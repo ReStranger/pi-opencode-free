@@ -2,78 +2,133 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import opencodeDirectExtension from "./index.js";
+import opencodeDirectExtension, {
+  COMPLETIONS_COMPAT,
+  RESPONSES_COMPAT,
+} from "./index.js";
 
-// Regression tests pinning Zen request invariants against pi-cache-optimizer's
-// actual payload transforms (see plans/cache-optimizer-compat-report.md §2):
-//   T1: delete payload.prompt_cache_retention (unless official OpenAI / opt-in)
-//   T2: { ...payload, prompt_cache_key: <hash> }  (spread, additive)
-//   (Anthropic cache_control ops are gated on anthropic-messages api — N/A.)
+// Zen request invariants, asserted against the extension's REAL code
+// (compat constants + toProviderModel output), not local mirrors.
+// Context: pi-cache-optimizer compatibility (see
+// plans/cache-optimizer-compat-report.md §2): Zen payloads must keep
+// max_tokens (never renamed to max_completion_tokens), keep
+// reasoning_content on assistant messages, and keep tool_calls intact.
+// Those payload shapes are produced by Pi's native engines from our
+// per-model api + compat fields, so pinning compat here pins the payload.
 
-async function getShim() {
+async function getConfig() {
   let registeredConfig: any = null;
   const fakePi = {
-    registerProvider(_id: string, config: any) { registeredConfig = config; },
+    on() {},
+    registerProvider(_id: string, config: any) {
+      registeredConfig = config;
+    },
   } as unknown as ExtensionAPI;
   await opencodeDirectExtension(fakePi);
   return registeredConfig;
 }
 
-// Verbatim mirrors of cache-optimizer's operations (index.ts of the extension).
-function stripPromptCacheRetention(payload: Record<string, unknown>): void {
-  // Gate 4 safe default applies to Zen (not official OpenAI, no opt-in).
-  delete payload.prompt_cache_retention;
+async function getHook() {
+  let hook: any = null;
+  const fakePi = {
+    on(event: string, handler: any) {
+      if (event === "before_provider_headers") hook = handler;
+    },
+    registerProvider() {},
+  } as unknown as ExtensionAPI;
+  await opencodeDirectExtension(fakePi);
+  return hook;
 }
-function addOpenAIPromptCacheKey(payload: Record<string, unknown>, key: string): Record<string, unknown> {
-  if (typeof payload.prompt_cache_key === "string" && payload.prompt_cache_key.trim()) return payload;
-  return { ...payload, prompt_cache_key: key };
-}
 
-test("T1: stripping prompt_cache_retention preserves all Zen-required fields", async () => {
-  const payload: Record<string, unknown> = {
-    model: "hy3-free",
-    max_tokens: 4096,
-    prompt_cache_retention: "long",
-    messages: [
-      {
-        role: "assistant",
-        reasoning_content: "<think>ok</think>",
-        content: "",
-        tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }],
-      },
-    ],
+test("compat constants keep max_tokens and never rename it", async () => {
+  assert.equal(COMPLETIONS_COMPAT.maxTokensField, "max_tokens");
+  assert.equal("max_completion_tokens" in COMPLETIONS_COMPAT, false);
+  assert.equal(RESPONSES_COMPAT.sessionAffinityFormat, "openai-nosession");
+});
+
+test("keyless free access applies via header hook and zen engines", async () => {
+  const cfg = await getConfig();
+  // No provider-level streamSimple: one wrapper could never cover all four
+  // backends (Pi's composer routes solely default-engine models through
+  // it), so every model points at its stamping `zen-*` engine adapter.
+  assert.equal(cfg.streamSimple, undefined);
+  assert.equal(cfg.api, "zen-openai-completions");
+  const hook = await getHook();
+  assert.equal(typeof hook, "function");
+  const headers: Record<string, string | null> = {
+    "x-opencode-client": "cli",
+    "x-opencode-project": "global",
+    Authorization: "Bearer none",
   };
-  stripPromptCacheRetention(payload);
-  assert.equal("prompt_cache_retention" in payload, false);
-  assert.equal(payload.max_tokens, 4096);                       // never renamed to max_completion_tokens
-  assert.equal((payload.messages as any)[0].reasoning_content, "<think>ok</think>");
-  assert.equal((payload.messages as any)[0].tool_calls.length, 1);
+  hook({ headers });
+  assert.equal(headers.Authorization, null);
+  assert.equal(headers["x-opencode-client"], "cli");
+  assert.match(
+    (headers as any)["x-opencode-session"],
+    /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
+  );
 });
 
-test("T2: prompt_cache_key injection is spread-additive and drops nothing", async () => {
-  const before = {
-    model: "qwen3-coder-free",
-    max_tokens: 1024,
-    stream: true,
-    messages: [{ role: "assistant", reasoning_content: "<think>x</think>", content: "" }],
-  };
-  const after = addOpenAIPromptCacheKey(before, "abc123hash");
-  for (const k of Object.keys(before)) assert.deepEqual(after[k], (before as any)[k]);
-  assert.equal(after.prompt_cache_key, "abc123hash");
-  assert.equal(after.max_tokens, 1024);
-});
-
-test("max_tokens is never renamed by any transform", async () => {
-  const p: any = addOpenAIPromptCacheKey({ max_tokens: 512 }, "k");
-  stripPromptCacheRetention(p);
-  assert.equal(p.max_tokens, 512);
-  assert.equal("max_completion_tokens" in p, false);
-});
-
-test("keyless shim wins over hook-injected Authorization in final header composition", async () => {
-  const cfg = await getShim();
-  const hookMutated = { ...cfg.headers, Authorization: "Bearer x", "x-session-affinity": "sess-1" };
-  const viaShim = { ...hookMutated, Authorization: null }; // shim spread, runs last
-  assert.equal(viaShim.Authorization, null);
-  assert.equal(viaShim["x-opencode-client"], "cli");
+test("models carry zen per-model api with stock-style compat and baseUrl routing", async () => {
+  const cfg = await getConfig();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any) => {
+    if (String(url).includes("models.dev"))
+      return {
+        ok: true,
+        json: async () => ({
+          opencode: {
+            models: {
+              "muse-spark-1.2-contributor-free": {
+                provider: { npm: "@ai-sdk/openai" },
+              },
+              "minimax-m3-free": { provider: { npm: "@ai-sdk/anthropic" } },
+              "gemini-free": { provider: { npm: "@ai-sdk/google" } },
+            },
+          },
+        }),
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "hy3-free" },
+          { id: "muse-spark-1.2-contributor-free" },
+          { id: "minimax-m3-free" },
+          { id: "gemini-free" },
+        ],
+      }),
+    };
+  }) as unknown as typeof fetch;
+  try {
+    const refreshed = await cfg.refreshModels({
+      allowNetwork: true,
+      signal: new AbortController().signal,
+      stored: undefined,
+      publish: async () => true,
+    });
+    const byId = (id: string) => refreshed.find((m: any) => m.id === id);
+    const hy3 = byId("hy3-free");
+    const muse = byId("muse-spark-1.2-contributor-free");
+    const minimax = byId("minimax-m3-free");
+    const gemini = byId("gemini-free");
+    // Engine routing mirrors stock opencode.json, via the stamping zen-* adapters.
+    assert.equal(hy3?.api, "zen-openai-completions");
+    assert.equal(muse?.api, "zen-openai-responses");
+    assert.equal(minimax?.api, "zen-anthropic-messages");
+    assert.equal(gemini?.api, "zen-google-generative-ai");
+    // Compat: completions-only flags stay on the completions engine.
+    assert.deepEqual(hy3?.compat, COMPLETIONS_COMPAT);
+    assert.equal(hy3?.compat.maxTokensField, "max_tokens");
+    assert.deepEqual(muse?.compat, RESPONSES_COMPAT);
+    assert.equal(minimax?.compat, undefined); // stock defines none
+    assert.equal(gemini?.compat, undefined); // stock defines none
+    // Base URLs: default /v1 inherited, Anthropic bare root override.
+    assert.equal(hy3?.baseUrl, undefined);
+    assert.equal(muse?.baseUrl, undefined);
+    assert.equal(minimax?.baseUrl, "https://opencode.ai/zen");
+    assert.equal(gemini?.baseUrl, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
