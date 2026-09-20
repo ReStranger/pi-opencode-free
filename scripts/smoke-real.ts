@@ -1,24 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * Real-scenario smoke test against the live OpenCode Zen API, exercising the
- * extension's exact provider config via Pi's native engine.
+ * extension's exact provider config via the registered `zen-*` engine
+ * adapters (the same stamping path every backend travels in production).
  * Run with: bun scripts/smoke-real.ts
  */
-import { openAICompletionsApi, openAIResponsesApi } from "@earendil-works/pi-ai/compat";
+import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import type {
   AssistantMessageEvent,
   Context,
   Model,
   Tool,
 } from "@earendil-works/pi-ai";
-
-const completionsStream = openAICompletionsApi().streamSimple;
-const responsesStream = openAIResponsesApi().streamSimple;
 import { discoverModels } from "../src/discovery.js";
+import {
+  OPENCODE_USER_AGENT,
+  ZEN_ANTHROPIC_BASE_URL,
+  ZEN_BASE_URL,
+  applyOpenCodeFreeHeaders,
+} from "../src/zen-headers.js";
+import {
+  nativeApiForZen,
+  registerZenApiProviders,
+  zenApiForNative,
+  ZEN_COMPLETIONS_API,
+} from "../src/zen-engines.js";
 
+registerZenApiProviders();
+
+// Mirrors src/index.ts COMPLETIONS_COMPAT (Zen free-tier quirks).
 const OPENCODE_COMPAT = {
   supportsStore: false,
   supportsDeveloperRole: false,
+  supportsFinishReason: false,
   maxTokensField: "max_tokens" as const,
   requiresReasoningContentOnAssistantMessages: true,
 };
@@ -26,37 +40,60 @@ const OPENCODE_COMPAT = {
 const HEADERS = {
   "x-opencode-client": "cli",
   "x-opencode-project": "global",
-  "User-Agent": "opencode/0.0.0-dev",
+  "User-Agent": OPENCODE_USER_AGENT,
 };
 
-/** Mirrors the streamSimple shim in src/index.ts (dispatches by model API). */
+/**
+ * Mirrors src/index.ts: per-model api selects the registered `zen-*` engine
+ * adapter (stamping + native dispatch). Headers are pre-stamped here the
+ * way Pi core's streamFn + before_provider_headers hook would stamp them in
+ * production; the adapter's composed transform then stamps them again on
+ * dispatch. Kept in sync via the shared zen-headers module — do not
+ * hand-roll header logic here.
+ */
 function shimStream(model: any, context: Context, options?: any) {
-  const native = model.api === "openai-responses" ? responsesStream : completionsStream;
-  return native(model, context, {
-    ...options,
-    headers: { ...options?.headers, ...HEADERS, Authorization: null },
-  });
+  const engine = getApiProvider(model.api);
+  if (!engine) {
+    throw new Error(`No API provider registered for api: ${model.api}`);
+  }
+  const headers: Record<string, string | null> = {
+    ...options?.headers,
+    ...HEADERS,
+  };
+  applyOpenCodeFreeHeaders(headers);
+  return engine.streamSimple(model, context, { ...options, headers });
 }
 
 function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
+  // Mirrors src/index.ts toProviderModel: zen-* engine routing with
+  // stock-style compat/baseUrl (completions quirks only apply to
+  // openai-completions; Anthropic/Google engines get no compat).
+  const api = zenApiForNative(m.api ?? "openai-completions") ?? ZEN_COMPLETIONS_API;
+  const native = nativeApiForZen(api) ?? "openai-completions";
   return {
     id: m.id.replace(/^opencode\//, ""),
     name: m.name,
-    api: m.api ?? "openai-completions",
+    api,
     provider: "opencode-free",
-    baseUrl: "https://opencode.ai/zen/v1",
+    baseUrl:
+      native === "anthropic-messages" ? ZEN_ANTHROPIC_BASE_URL : ZEN_BASE_URL,
     reasoning: m.reasoning ?? false,
     thinkingLevelMap: m.thinkingLevelMap,
     input: ["text"],
     contextWindow: m.contextWindow ?? 128_000,
     maxTokens: m.maxTokens ?? 16_384,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat: OPENCODE_COMPAT,
+    compat:
+      native === "openai-responses"
+        ? { sessionAffinityFormat: "openai-nosession" }
+        : native === "openai-completions"
+          ? OPENCODE_COMPAT
+          : undefined,
     headers: HEADERS,
   };
 }
 
-async function run(model: Model<"openai-completions">, context: Context, opts?: any) {
+async function run(model: Model, context: Context, opts?: any) {
   const events: AssistantMessageEvent[] = [];
   const stream = shimStream(model, context, { apiKey: "none", ...opts });
   let final: any = null;
@@ -88,7 +125,7 @@ check(
 );
 
 const nonReasoning = models.find(m => !m.reasoning) ?? models[0];
-console.log(`\n== 2. Plain chat via native engine (${nonReasoning.id}) ==`);
+console.log(`\n== 2. Plain chat via zen engine (${nonReasoning.id}) ==`);
 {
   const { final } = await run(toPiModel(nonReasoning), {
     systemPrompt: "You are terse.",
@@ -105,7 +142,7 @@ const reasoner =
   models.find(m => m.reasoning && m.id.includes("hy3")) ??
   models.find(m => m.reasoning && m.thinkingLevelMap?.low);
 if (reasoner) {
-  console.log(`\n== 3. Reasoning stream via native engine (${reasoner.id}, level=low) ==`);
+  console.log(`\n== 3. Reasoning stream via zen engine (${reasoner.id}, level=low) ==`);
   const { final } = await run(toPiModel(reasoner), {
     systemPrompt: "You are terse.",
     messages: [{ role: "user", content: "What is 17*23? Think briefly, then answer.", timestamp: Date.now() }],
@@ -164,10 +201,10 @@ console.log(`\n== 4. Native tool calling (${toolModel.id}) ==`);
 }
 
 // Models routed via @ai-sdk/openai (e.g. muse-spark) only answer on Zen's
-// Responses endpoint — exercises pi's native openai-responses engine.
+// Responses endpoint — exercises the zen openai-responses engine adapter.
 const responsesModel = models.find(m => m.api === "openai-responses");
 if (responsesModel) {
-  console.log(`\n== 5. Responses-API model via native engine (${responsesModel.id}) ==`);
+  console.log(`\n== 5. Responses-API model via zen engine (${responsesModel.id}) ==`);
   const { final } = await run(toPiModel(responsesModel), {
     systemPrompt: "You are terse.",
     messages: [{ role: "user", content: "Reply with exactly: RESPONSES_OK", timestamp: Date.now() }],
