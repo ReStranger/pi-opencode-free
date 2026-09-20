@@ -4,9 +4,18 @@ Free OpenCode models in [Pi](https://github.com/earendil-works/pi), no API key.
 
 ## Why
 
-The Pi CLI already ships an `opencode` provider, but through it the models only run on paid plans. This extension hits the same endpoint and removes the need for a paid plan: it discovers the models advertised as free and sends the OpenCode client headers (`x-opencode-client`, `x-opencode-project`, `User-Agent`) on every request, which authorizes free, keyless usage.
+The Pi CLI already ships an `opencode` provider, but through it the models only run on paid plans. This extension hits the same endpoint for the models advertised as free and sends the OpenCode client headers (`x-opencode-client`, `x-opencode-project`, `User-Agent`, `x-opencode-session`/`x-opencode-request`) on every request.
 
-Everything else is Pi's native `openai-completions` engine: streaming, reasoning, tools. Nothing is intercepted or rewritten.
+> Pure keyless: no key, no account, no paid plan. Note that Zen currently
+> rejects anonymous traffic outside OpenCode with `403 FreeTierError:
+> OpenCode's free tier can only be used from within OpenCode` (verified
+> 2026-09-18 — even a correct `User-Agent` + full `x-opencode-*` headers
+> fail; chat, tools, and compaction/summarization all fail the same way).
+> This extension sends the exact OpenCode client identity so requests are
+> indistinguishable from OpenCode's own; if Zen opens anonymous access
+> again, everything works with zero configuration.
+
+Everything else is Pi's native engines with per-model dispatch, exactly like the stock `opencode` provider: streaming, reasoning, tools. The only interception is a `before_provider_headers` hook (plus a provider-level `streamSimple` wrapper covering the same transform for foreground children) that stamps the OpenCode identity headers on Zen-bound requests and nulls every auth header, so neither the `"none"` placeholder nor any stored credential ever leaks on the wire. Two base URLs are used: `https://opencode.ai/zen/v1` for OpenAI-compatible and Google engines, and the bare root `https://opencode.ai/zen` for the Anthropic-messages backend (same split as stock).
 
 ## Install
 
