@@ -25,6 +25,7 @@ import {
   zenApiForNative,
   type HeaderTransform,
 } from "./zen-engines.js";
+import { hookRequiredChildExtension } from "./required-child.js";
 
 // Re-exported for scripts/smoke-real.ts so the smoke path mirrors prod.
 export {
@@ -254,6 +255,19 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
     applyOpenCodeFreeHeaders(event.headers);
   });
 
+  // Subagent children launch with ambient extensions disabled, so neither
+  // this hook nor the `zen-*` adapters below would load there on their own
+  // (every `opencode-free/*` child then fails with Zen 401 before any tool
+  // runs). Register this entry file as a host-required child extension for
+  // the current session so children load it like any ordinary extension.
+  // Best-effort: never throws, no-op without pi-subagents installed.
+  try {
+    hookRequiredChildExtension(pi);
+  } catch {
+    // Provider registration below must still happen; a missed child
+    // registration only preserves the old failure mode.
+  }
+
   // Registered once with an empty list; models come exclusively through
   // refreshModels (snapshot restore on session init, live discovery on
   // explicit refresh) — pi's native model lifecycle.
@@ -264,10 +278,11 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
   // the provider-level `api` (`model.api === extension.api`), and a
   // provider declares exactly one `api`, so one wrapper could never cover
   // all four Zen backends (the non-completions models depended solely on
-  // the ambient hook, which never fires in foreground children → Zen 403).
-  // The `zen-*` adapters travel with the inherited provider config, which
-  // is what makes foreground (`async:false`) children work on every
-  // engine: they inherit the provider but no ambient hook handlers.
+  // the ambient hook, which never fires in foreground children → Zen 401).
+  // The `zen-*` adapters reach foreground (`async:false`) children through
+  // the required-child registration above: the child loads this entry file
+  // as an ordinary extension, re-registers the adapters, and stamps every
+  // backend with no ambient hooks required.
   //
   // `api` doubles as the per-model default engine (the Zen default
   // completions path). This is not a dispatch change: every model carries
