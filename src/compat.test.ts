@@ -9,8 +9,7 @@ import opencodeDirectExtension, {
 
 // Zen request invariants, asserted against the extension's REAL code
 // (compat constants + toProviderModel output), not local mirrors.
-// Context: pi-cache-optimizer compatibility (see
-// plans/cache-optimizer-compat-report.md §2): Zen payloads must keep
+// Context: pi-cache-optimizer compatibility — Zen payloads must keep
 // max_tokens (never renamed to max_completion_tokens), keep
 // reasoning_content on assistant messages, and keep tool_calls intact.
 // Those payload shapes are produced by Pi's native engines from our

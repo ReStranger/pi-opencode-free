@@ -15,7 +15,7 @@ The Pi CLI already ships an `opencode` provider, but through it the models only 
 > indistinguishable from OpenCode's own; if Zen opens anonymous access
 > again, everything works with zero configuration.
 
-Everything else is Pi's native engines with per-model dispatch, exactly like the stock `opencode` provider: streaming, reasoning, tools. The only interception is a `before_provider_headers` hook (plus a provider-level `streamSimple` wrapper covering the same transform for foreground children) that stamps the OpenCode identity headers on Zen-bound requests and nulls every auth header, so neither the `"none"` placeholder nor any stored credential ever leaks on the wire. Two base URLs are used: `https://opencode.ai/zen/v1` for OpenAI-compatible and Google engines, and the bare root `https://opencode.ai/zen` for the Anthropic-messages backend (same split as stock).
+Everything else is Pi's native engines with per-model dispatch, exactly like the stock `opencode` provider: streaming, reasoning, tools. There are two interception points, and they share one transform (`src/zen-headers.ts`): a `before_provider_headers` hook, and one stamping engine adapter per Zen backend — `zen-openai-completions`, `zen-openai-responses`, `zen-anthropic-messages`, `zen-google-generative-ai` (`src/zen-engines.ts`). Models point at those adapters, so the stamp travels with the provider config even where no ambient hook runs: foreground (`async:false`) subagent children. Each request gets the OpenCode identity headers stamped on it and every auth header nulled, so neither the `"none"` placeholder nor any stored credential ever leaks on the wire. Because subagent children also launch with ambient extensions disabled, the entry file additionally registers itself as a host-required child extension for the session (`src/required-child.ts`, best-effort, no-op without `pi-subagents`). Two base URLs are used: `https://opencode.ai/zen/v1` for OpenAI-compatible and Google engines, and the bare root `https://opencode.ai/zen` for the Anthropic-messages backend (same split as stock).
 
 ## Install
 
@@ -47,8 +47,12 @@ bun scripts/smoke-real.ts  # live request against Zen
 
 | File | Purpose |
 |------|---------|
+| `src/index.ts` | Native provider registration, per-model config, snapshot persistence |
 | `src/discovery.ts` | Free-model discovery (Zen + models.dev enrichment) |
-| `src/index.ts` | Native provider registration and snapshot persistence |
+| `src/zen-engines.ts` | Per-backend `zen-*` engine adapters (stamp, then delegate to native) |
+| `src/zen-headers.ts` | Shared OpenCode client identity: headers, session/request ids |
+| `src/required-child.ts` | Self-registration for subagent children (optional `pi-subagents`) |
+| `scripts/smoke-real.ts` | Live end-to-end checks against the Zen API |
 
 ## License
 
