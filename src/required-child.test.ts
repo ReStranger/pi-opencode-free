@@ -109,6 +109,33 @@ test("hook registers under both id and file keys on session_start", async () => 
   assert.equal(disposed, 2);
 });
 
+test("hook dedupes concurrent session_start registrations", async () => {
+  const { fakePi, handlers } = makeFakePi();
+  const seen: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  hookRequiredChildExtension(fakePi, {
+    sessionId: "s",
+    selfPath: "/tmp/entry.ts",
+    importRegister: async () => {
+      await gate; // keep the first pass in flight
+      return (input) => {
+        seen.push(input.sessionId);
+        return { dispose() {} };
+      };
+    },
+  });
+  const starts = handlers.get("session_start") ?? [];
+  starts[0]!({ type: "session_start" }, {});
+  starts[0]!({ type: "session_start" }, {}); // arrives mid-flight
+  release();
+  await tick();
+  await tick();
+  assert.deepEqual(seen, ["s"]); // one registration, not two
+});
+
 test("hook tolerates duplicate session_start and missing peer", async () => {
   const { fakePi, handlers } = makeFakePi();
   let calls = 0;
