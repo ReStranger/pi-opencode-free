@@ -62,6 +62,45 @@ const THINKING_LEVELS = [
   "max",
 ] as const;
 
+/**
+ * Deadline signal. Prefers `AbortSignal.timeout`; older runtimes get an
+ * explicit controller so discovery can never hang the extension load.
+ */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  // The deadline must not keep the process alive on its own.
+  (timer as { unref?: () => void }).unref?.();
+  return controller.signal;
+}
+
+/**
+ * Merges an optional caller signal (Pi aborting the refresh) with an internal
+ * deadline. Prefers `AbortSignal.any`; the fallback bridges through a private
+ * controller so a caller abort is never silently dropped on older runtimes.
+ */
+function combineSignals(
+  ...signals: (AbortSignal | undefined)[]
+): AbortSignal | undefined {
+  const list = signals.filter((s): s is AbortSignal => !!s);
+  const first = list[0];
+  if (!first) return undefined;
+  if (list.length === 1) return first;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(list);
+  const controller = new AbortController();
+  for (const signal of list) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), {
+      once: true,
+    });
+  }
+  return controller.signal;
+}
+
 function baseModelId(id: string): string {
   return id.startsWith("opencode/")
     ? id.slice("opencode/".length).replace(/-free$/, "")
@@ -257,29 +296,12 @@ export async function discoverModels(opts?: {
     // Keep the required Zen request independent from the optional, 4+ MB
     // models.dev catalog. A slow catalog must not abort an otherwise healthy
     // Zen response (the old shared signal made this return an empty list).
-    const zenTimeoutSignal =
-      typeof AbortSignal.timeout === "function"
-        ? AbortSignal.timeout(timeoutMs)
-        : undefined;
     const catalogBudget = opts?.catalogTimeoutMs ?? CATALOG_TIMEOUT_MS;
-    const catalogTimeoutSignal =
-      typeof AbortSignal.timeout === "function"
-        ? AbortSignal.timeout(Math.min(timeoutMs, catalogBudget))
-        : undefined;
-    const zenSignals = [zenTimeoutSignal, opts?.signal].filter(
-      (s): s is AbortSignal => !!s,
+    const zenSignal = combineSignals(timeoutSignal(timeoutMs), opts?.signal);
+    const catalogSignal = combineSignals(
+      timeoutSignal(Math.min(timeoutMs, catalogBudget)),
+      opts?.signal,
     );
-    const catalogSignals = [catalogTimeoutSignal, opts?.signal].filter(
-      (s): s is AbortSignal => !!s,
-    );
-    const zenSignal =
-      zenSignals.length > 1 && typeof AbortSignal.any === "function"
-        ? AbortSignal.any(zenSignals)
-        : zenSignals[0];
-    const catalogSignal =
-      catalogSignals.length > 1 && typeof AbortSignal.any === "function"
-        ? AbortSignal.any(catalogSignals)
-        : catalogSignals[0];
     const [zenResult, catalogResult] = await Promise.allSettled([
       (async () => {
         const res = await fetcher(ZEN_MODELS_URL, {
