@@ -136,6 +136,8 @@ export function hookRequiredChildExtension(
   },
 ): void {
   let disposables: (() => void)[] | undefined;
+  /** Set while a registration pass is in flight (see `register`). */
+  let registering: Promise<void> | undefined;
 
   const registerOne = (
     registerFn: RegisterRequiredChildExtensions,
@@ -161,36 +163,54 @@ export function hookRequiredChildExtension(
     }
   };
 
-  const register = async (ctx: SessionIdentityLike | undefined) => {
-    try {
-      if (disposables) return;
-      const keys = resolveSessionKeys(ctx);
-      const primary = overrides?.sessionId ?? keys.primary;
-      const secondaries =
-        overrides?.secondarySessionIds ??
-        (keys.secondary ? [keys.secondary] : []);
-      const sessionIds = [
-        ...new Set(
-          [primary, ...secondaries].filter(
-            (id): id is string => typeof id === "string" && !!id,
+  const register = (ctx: SessionIdentityLike | undefined): Promise<void> => {
+    // `session_start` can fire again while the first pass is still awaiting
+    // the optional peer (or on a reload). Registering twice would overwrite
+    // `disposables` and leak the first registration's dispose, so a second
+    // call joins the in-flight pass instead of starting another one.
+    if (disposables || registering) return registering ?? Promise.resolve();
+    const pass = (async () => {
+      try {
+        const keys = resolveSessionKeys(ctx);
+        const primary = overrides?.sessionId ?? keys.primary;
+        const secondaries =
+          overrides?.secondarySessionIds ??
+          (keys.secondary ? [keys.secondary] : []);
+        const sessionIds = [
+          ...new Set(
+            [primary, ...secondaries].filter(
+              (id): id is string => typeof id === "string" && !!id,
+            ),
           ),
-        ),
-      ];
-      const selfPath = overrides?.selfPath ?? resolveSelfEntryPath();
-      if (sessionIds.length === 0 || !selfPath) return;
-      const registerFn =
-        (await (overrides?.importRegister ?? loadRegisterFn)()) ?? undefined;
-      if (!registerFn) return;
-      const created: (() => void)[] = [];
-      for (const sessionId of sessionIds) {
-        const dispose = registerOne(registerFn, sessionId, selfPath);
-        if (dispose) created.push(dispose);
+        ];
+        const selfPath = overrides?.selfPath ?? resolveSelfEntryPath();
+        if (sessionIds.length === 0 || !selfPath) return;
+        const registerFn =
+          (await (overrides?.importRegister ?? loadRegisterFn)()) ?? undefined;
+        if (!registerFn) return;
+        const created: (() => void)[] = [];
+        for (const sessionId of sessionIds) {
+          const dispose = registerOne(registerFn, sessionId, selfPath);
+          if (dispose) created.push(dispose);
+        }
+        if (created.length > 0) disposables = created;
+      } catch {
+        // Best-effort: provider registration already happened; a missed child
+        // registration must never break the parent session.
       }
-      if (created.length > 0) disposables = created;
-    } catch {
-      // Best-effort: provider registration already happened; a missed child
-      // registration must never break the parent session.
-    }
+    })();
+    // Clear the in-flight marker on either outcome: `pass` swallows its own
+    // errors, but a rejected `registering` would surface as an unhandled
+    // rejection in the `void register(...)` caller.
+    registering = pass.then(
+      () => {
+        registering = undefined;
+      },
+      () => {
+        registering = undefined;
+      },
+    );
+    return registering;
   };
 
   pi.on("session_start", (_event, ctx) => {
