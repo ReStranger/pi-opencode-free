@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import opencodeDirectExtension from "./index.js";
 import { discoverModels } from "./discovery.js";
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
@@ -103,6 +103,37 @@ test("package.json is configured for public release and distribution", () => {
   assert.deepEqual(pkg.pi?.extensions, ["./index.ts"]);
   assert.ok(pkg.files?.includes("dist"));
   assert.ok(pkg.scripts?.prepack);
+});
+
+test("every declared extension entry reaches the published tarball", () => {
+  // Regression guard: `pi.extensions` is resolved inside the INSTALLED
+  // package, and Pi's loader drops declared paths that are not there
+  // (`resolveExtensionEntries` checks existsSync, then falls back to a root
+  // index.ts/index.js). npm only ships what `files` whitelists, so an entry
+  // that is fine in a checkout can be absent from the registry tarball — and
+  // then the extension loads silently as nothing at all.
+  const pkgDir = new URL("..", import.meta.url);
+  const pkg = JSON.parse(
+    readFileSync(new URL("package.json", pkgDir), "utf8"),
+  );
+  const strip = (p: string) => p.replace(/^\.\//, "").replace(/\/+$/, "");
+  const declared: string[] = pkg.pi?.extensions ?? [];
+  const published: string[] = (pkg.files ?? [])
+    .filter((f: string) => !f.startsWith("!"))
+    .map(strip);
+  assert.ok(declared.length > 0, "package must declare an extension entry");
+  for (const entry of declared) {
+    const rel = strip(entry);
+    assert.ok(
+      existsSync(new URL(rel, pkgDir)),
+      `declared extension entry must exist: ${rel}`,
+    );
+    const top = rel.split("/")[0]!;
+    assert.ok(
+      published.some((p) => p === rel || p === top || rel.startsWith(`${p}/`)),
+      `declared extension entry must be covered by "files": ${rel} (files: ${published.join(", ")})`,
+    );
+  }
 });
 
 test("cache-only refresh restores persisted snapshot without network", async () => {
