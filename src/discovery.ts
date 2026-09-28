@@ -159,16 +159,30 @@ function buildThinkingLevelMap(
   return map;
 }
 
-/** Catalog lookup mirroring filterFreeModels: bare id first, then base id. */
+/**
+ * Exact catalog entry for the model's own id, with no fallback. Use this for
+ * anything that must come from the model itself — engine routing especially.
+ */
+export function lookupCatalogMetaExact(
+  catalog: Record<string, ModelMeta> | undefined,
+  id: string,
+): ModelMeta | undefined {
+  if (!catalog) return undefined;
+  return catalog[normalizeSnapshotId(id)];
+}
+
+/**
+ * Metadata lookup: the model's own entry first, then the base id (the
+ * `-free` marketing suffix stripped), which in practice means the paid
+ * sibling. The fallback is metadata-only — see `filterFreeModels` for why it
+ * must never decide engine routing.
+ */
 export function lookupCatalogMeta(
   catalog: Record<string, ModelMeta> | undefined,
   id: string,
 ): ModelMeta | undefined {
   if (!catalog) return undefined;
-  const bare = id.startsWith("opencode/")
-    ? id.slice("opencode/".length)
-    : id;
-  return catalog[bare] ?? catalog[baseModelId(id)];
+  return catalog[normalizeSnapshotId(id)] ?? catalog[baseModelId(id)];
 }
 
 export function filterFreeModels(
@@ -179,6 +193,11 @@ export function filterFreeModels(
     .filter((m) => FREE_REGEX.test(m.id))
     .map((m) => {
       const meta = lookupCatalogMeta(opts?.catalog, m.id);
+      // Engine routing comes only from the model's own entry: the base-id
+      // fallback above describes the paid sibling, whose backend may differ,
+      // and a wrong engine means a hard request failure. Missing routing
+      // metadata degrades gracefully to the Zen default (chat/completions).
+      const ownEntry = lookupCatalogMetaExact(opts?.catalog, m.id);
       return {
         id: m.id.startsWith("opencode/") ? m.id : `opencode/${m.id}`,
         name: m.name ?? meta?.name ?? humanizeName(m.id),
@@ -187,7 +206,7 @@ export function filterFreeModels(
         maxTokens: meta?.limit?.output ?? 16_384,
         thinkingLevelMap: buildThinkingLevelMap(meta),
         input: meta?.input,
-        api: mapProviderNpmToApi(meta?.provider?.npm),
+        api: mapProviderNpmToApi(ownEntry?.provider?.npm),
       };
     });
 }
@@ -270,7 +289,13 @@ function applyPreviousEnrichment(
     if (!prev?.reasoning) return m;
     return {
       ...m,
-      name: m.name.endsWith(" (Free)") && prev.name ? prev.name : m.name,
+      // Only a generated placeholder gives way to the snapshot's name; a real
+      // name from the endpoint or catalog always wins. `humanizeName` over the
+      // bare id is exactly the placeholder `filterFreeModels` produces.
+      name:
+        m.name === humanizeName(normalizeSnapshotId(m.id)) && prev.name
+          ? prev.name
+          : m.name,
       reasoning: prev.reasoning,
       contextWindow: prev.contextWindow ?? m.contextWindow,
       maxTokens: prev.maxTokens ?? m.maxTokens,
