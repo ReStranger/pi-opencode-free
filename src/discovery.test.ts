@@ -15,7 +15,7 @@ test("filterFreeModels filters free models with conservative default metadata", 
     ["opencode/hy3-free", "opencode/big-pickle"],
   );
   const [hy3, bigPickle] = result;
-  assert.equal(hy3?.reasoning, false); // no catalog, no FALLBACK_META
+  assert.equal(hy3?.reasoning, false); // no catalog: conservative defaults
   assert.equal(hy3?.contextWindow, 128_000);
   assert.equal(bigPickle?.reasoning, false);
 });
@@ -128,6 +128,24 @@ test("models.dev npm maps to stock-style native engines", () => {
   assert.equal(plain[0]?.api, undefined); // zen default: chat completions
 });
 
+test("a paid sibling entry enriches metadata but never decides the engine", () => {
+  // The base-id fallback (the `-free` suffix stripped) describes the PAID
+  // sibling. It may differ in backend, and a wrong engine fails the request
+  // outright, so routing must come from the model's own catalog entry only.
+  const routed = filterFreeModels([{ id: "space-bunny-free" }], {
+    catalog: {
+      "space-bunny": {
+        name: "Space Bunny",
+        provider: { npm: "@ai-sdk/anthropic" },
+        limit: { context: 400_000, output: 40_000 },
+      },
+    },
+  });
+  assert.equal(routed[0]?.name, "Space Bunny"); // metadata falls back
+  assert.equal(routed[0]?.contextWindow, 400_000);
+  assert.equal(routed[0]?.api, undefined); // routing does not
+});
+
 test("discoverModels applies conservative defaults when models.dev is unreachable", async () => {
   const routes = (url: string | URL | Request) => {
     if (String(url).includes("models.dev"))
@@ -197,6 +215,7 @@ test("discoverModels re-applies previous enrichment when the catalog is unreacha
   const hy3 = models.find((m) => m.id === "opencode/hy3-free");
   assert.ok(hy3);
   assert.equal(hy3.reasoning, true); // not wiped to false
+  assert.equal(hy3.name, "Hy3 Custom"); // generated placeholder → snapshot name
   assert.equal(hy3.contextWindow, 256_000);
   assert.equal(hy3.maxTokens, 64_000);
   assert.deepEqual(hy3.thinkingLevelMap, { low: "low", off: null });
@@ -243,6 +262,33 @@ test("discoverModels lets fresh catalog truth win over previous snapshot", async
   assert.ok(hy3);
   assert.equal(hy3.contextWindow, 500_000); // fresh catalog, not stale snapshot
   assert.equal(hy3.name, "Hy3 Fresh");
+});
+
+test("discoverModels keeps a real endpoint name over the snapshot's", async () => {
+  const routes = (url: string | URL | Request) => {
+    if (String(url).includes("models.dev"))
+      return Promise.reject(new Error("Offline"));
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({ data: [{ id: "hy3-free", name: "Hy3 Turbo" }] }),
+    });
+  };
+  const models = await discoverModels({
+    fetchFn: routes as unknown as typeof fetch,
+    previous: [
+      {
+        id: "opencode/hy3-free",
+        name: "Hy3 Stale",
+        reasoning: true,
+        contextWindow: 256_000,
+        maxTokens: 64_000,
+      },
+    ],
+  });
+  const hy3 = models.find((m) => m.id === "opencode/hy3-free");
+  assert.ok(hy3);
+  assert.equal(hy3.name, "Hy3 Turbo"); // endpoint truth wins over the snapshot
+  assert.equal(hy3.reasoning, true); // enrichment still applies to the rest
 });
 
 test("discoverModels enriches per-model when the catalog lacks an entry", async () => {
