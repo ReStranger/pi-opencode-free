@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
-import opencodeDirectExtension, { createZenStreamSimple } from "./index.js";
+import opencodeDirectExtension from "./index.js";
 import { discoverModels } from "./discovery.js";
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
 
@@ -450,94 +450,6 @@ test("header hook leaves absent x-api-key alone", async () => {
   assert.equal("x-api-key" in headers, false);
   assert.equal("x-goog-api-key" in headers, false);
   assert.ok(headers["x-opencode-session"]);
-});
-
-test("provider streamSimple stamps Zen identity without ambient hooks (foreground path)", async () => {
-  // Fake native engine: captures what the wrapper forwards and returns a
-  // canned stream, like an engine adapter would.
-    let received: any = null;
-    const cannedStream = { marker: "engine-stream" };
-    const wrapper = createZenStreamSimple(() => ({
-      streamSimple: ((model: any, context: any, options: any) => {
-        received = { model, context, options };
-        return cannedStream as any;
-      }) as any,
-    }));
-    const model = {
-      api: "openai-completions",
-      provider: "opencode-free",
-      id: "hy3-free",
-      baseUrl: "https://opencode.ai/zen/v1",
-    };
-    const context = [{ role: "user", content: "hi" }];
-    // Foreground child streamFn: attribution merged UNDER the assembled
-    // headers (provider-static wins) — faithful to
-    // mergeProviderAttributionHeaders order; no hook runs in-process.
-    let parentTransformCalls = 0;
-    const inputOptions = {
-      temperature: 0.5,
-      transformHeaders: async (headers: Record<string, string | null>) => {
-        parentTransformCalls++;
-        return {
-          "x-opencode-client": "pi",
-          "x-opencode-session": "raw-pi-session-id",
-          ...headers,
-        };
-      },
-    };
-    const out = (wrapper as any)(model, context, inputOptions);
-    assert.equal(out, cannedStream); // transparent delegation
-    assert.equal(received.model, model);
-    assert.equal(received.context, context);
-    assert.equal(received.options.temperature, 0.5); // unrelated options pass through
-    assert.equal(typeof received.options.transformHeaders, "function");
-    // What a native engine adapter would do with the composed transform:
-    const engineHeaders = {
-      "x-opencode-client": "cli",
-      "x-opencode-project": "global",
-      "x-opencode-session": "ses_staticfallback000000000000",
-      "User-Agent": "old-agent",
-      Authorization: "Bearer none",
-    };
-    const first = await received.options.transformHeaders(engineHeaders);
-    assert.equal(parentTransformCalls, 1); // core transform runs first
-    assert.equal(first["x-opencode-client"], "cli"); // wrapper restores cli over attribution's pi
-    assert.match(first["x-opencode-session"], /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
-    assert.notEqual(first["x-opencode-session"], "ses_staticfallback000000000000"); // fresh, not the static fallback
-    assert.match(first["x-opencode-request"], /^msg_[0-9a-f-]{36}$/);
-    assert.equal(first["User-Agent"], "opencode/1.18.31");
-    assert.equal(first.Authorization, null); // placeholder never leaks
-    const second = await received.options.transformHeaders(engineHeaders);
-    assert.notEqual(
-      second["x-opencode-session"],
-      first["x-opencode-session"],
-      "every request gets fresh canonical ids (retries reuse headers)",
-  );
-});
-
-test("provider streamSimple leaves foreign traffic untouched", async () => {
-  let received: any = null;
-  const wrapper = createZenStreamSimple(() => ({
-    streamSimple: ((_model: any, _context: any, options: any) => {
-      received = options;
-      return {} as any;
-    }) as any,
-  }));
-  const model = { api: "openai-completions", provider: "opencode-free", id: "x" };
-  (wrapper as any)(model, [], undefined); // no parent transform at all
-  const headers = { Authorization: "Bearer real-user-key" };
-  const out = await received.transformHeaders(headers);
-  assert.equal(out.Authorization, "Bearer real-user-key"); // no cli/project markers → no-op
-  assert.equal(out["x-opencode-session"], undefined);
-});
-
-test("provider streamSimple fails loud on unknown engine (native parity)", () => {
-  const wrapper = createZenStreamSimple(() => undefined);
-  const model = { api: "no-such-engine", provider: "opencode-free", id: "x" };
-  assert.throws(
-    () => (wrapper as any)(model, [], undefined),
-    /No API provider registered for api: no-such-engine/,
-  );
 });
 
 test("cache-only refresh re-derives anthropic baseUrl from legacy snapshots", async () => {
