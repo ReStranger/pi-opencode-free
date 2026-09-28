@@ -7,6 +7,7 @@
  */
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import type {
+  Api,
   AssistantMessageEvent,
   Context,
   Model,
@@ -25,17 +26,10 @@ import {
   zenApiForNative,
   ZEN_COMPLETIONS_API,
 } from "../src/zen-engines.js";
+// Imported, never mirrored: compat flags must match production exactly.
+import { COMPLETIONS_COMPAT, RESPONSES_COMPAT } from "../src/index.js";
 
 registerZenApiProviders();
-
-// Mirrors src/index.ts COMPLETIONS_COMPAT (Zen free-tier quirks).
-const OPENCODE_COMPAT = {
-  supportsStore: false,
-  supportsDeveloperRole: false,
-  supportsFinishReason: false,
-  maxTokensField: "max_tokens" as const,
-  requiresReasoningContentOnAssistantMessages: true,
-};
 
 const HEADERS = {
   "x-opencode-client": "cli",
@@ -65,9 +59,10 @@ function shimStream(model: any, context: Context, options?: any) {
 }
 
 function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
-  // Mirrors src/index.ts toProviderModel: zen-* engine routing with
-  // stock-style compat/baseUrl (completions quirks only apply to
-  // openai-completions; Anthropic/Google engines get no compat).
+  // Mirrors src/index.ts toProviderModel (model SHAPE only — the compat and
+  // engine constants above/below are imported, not copied): zen-* engine
+  // routing with stock-style compat/baseUrl (completions quirks apply only
+  // to openai-completions; Anthropic/Google engines get no compat).
   const api = zenApiForNative(m.api ?? "openai-completions") ?? ZEN_COMPLETIONS_API;
   const native = nativeApiForZen(api) ?? "openai-completions";
   return {
@@ -85,15 +80,15 @@ function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     compat:
       native === "openai-responses"
-        ? { sessionAffinityFormat: "openai-nosession" }
+        ? RESPONSES_COMPAT
         : native === "openai-completions"
-          ? OPENCODE_COMPAT
+          ? COMPLETIONS_COMPAT
           : undefined,
     headers: HEADERS,
   };
 }
 
-async function run(model: Model, context: Context, opts?: any) {
+async function run(model: Model<Api>, context: Context, opts?: any) {
   const events: AssistantMessageEvent[] = [];
   const stream = shimStream(model, context, { apiKey: "none", ...opts });
   let final: any = null;
