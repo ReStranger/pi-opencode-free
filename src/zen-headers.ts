@@ -85,9 +85,10 @@ export function deleteHeader(headers: MutableHeaders, name: string): void {
 
 /**
  * Zen request transform for our provider's traffic. Runs inside Pi's
- * `before_provider_headers` for every native engine (and inside the
- * provider-level `streamSimple` wrapper for the completions engine, which is
- * what makes foreground children work), so one place covers all backends.
+ * `before_provider_headers` for every native engine and inside each `zen-*`
+ * engine adapter (see `./zen-engines.js`) — the adapter path is what makes
+ * foreground (`async:false`) children work, since they inherit providers but
+ * no ambient hooks. Either way one transform covers all four backends.
  * Gated on the OpenCode identity headers our provider sets; foreign traffic
  * (no `x-opencode-client`/`x-opencode-project`) is left untouched.
  *

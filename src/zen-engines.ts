@@ -113,7 +113,7 @@ export function composeZenTransformHeaders(
 /**
  * `transformHeaders` is threaded through request options by Pi core's
  * streamFn (sdk.ts) but is absent from pi-ai's public option types, hence
- * the structural read/cast here (same pattern as createZenStreamSimple).
+ * the structural read/cast here (the same one Pi core performs).
  */
 function withZenHeaders<O>(options: O): O {
   const parent = (

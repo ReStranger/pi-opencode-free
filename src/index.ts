@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { Api, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import {
-  getApiProvider,
-  type ApiStreamSimpleFunction,
-} from "@earendil-works/pi-ai/compat";
 import { discoverModels, type OpenCodeModelInfo } from "./discovery.js";
 import {
   OPENCODE_USER_AGENT,
@@ -19,11 +14,9 @@ import {
 import {
   ZEN_ANTHROPIC_API,
   ZEN_COMPLETIONS_API,
-  composeZenTransformHeaders,
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
-  type HeaderTransform,
 } from "./zen-engines.js";
 import { hookRequiredChildExtension } from "./required-child.js";
 
@@ -194,62 +187,6 @@ function toPreviousInput(m: unknown): OpenCodeModelInfo | null {
   };
 }
 
-/**
- * The Zen request transform as a provider-level `streamSimple` wrapper:
- * composes Pi core's `transformHeaders` (attribution + hook wherever hooks
- * run) with `applyOpenCodeFreeHeaders`, then delegates straight to the
- * native engine adapter via `getApiProvider` — never to compat's top-level
- * `streamSimple` (that would route back through the composed provider and
- * recurse).
- *
- * Kept as a tested stamping primitive and for backward compatibility, but
- * the provider below no longer wires it: Pi's composer routes such a
- * wrapper solely to models whose engine matches the provider-level `api`
- * (`model.api === extension.api`), and a provider declares exactly one
- * `api` — one wrapper could never cover all four Zen backends. Per-request
- * stamping on every engine now lives in the `zen-*` engine adapters (see
- * `./zen-engines.js`), which travel with the inherited provider config —
- * that is what makes foreground (`async:false`) children work, since they
- * inherit providers but no ambient hook handlers.
- *
- * `resolveEngine` is injectable for tests; production always uses the real
- * engine registry.
- */
-export function createZenStreamSimple(
-  resolveEngine: (
-    api: Api,
-  ) => Pick<
-    NonNullable<ReturnType<typeof getApiProvider>>,
-    "streamSimple"
-  > | undefined = (api) => getApiProvider(api),
-): ApiStreamSimpleFunction {
-  return (model, context, options) => {
-    // Models may carry a `zen-*` id; resolve (and re-key to) the native
-    // engine so pi-ai's `model.api === api` guard does not throw
-    // `Mismatched api: zen-* expected <native>`. Direct native ids pass
-    // through unchanged.
-    const native = nativeApiForZen(model.api) ?? model.api;
-    const engine = resolveEngine(native);
-    if (!engine) {
-      throw new Error(`No API provider registered for api: ${native}`);
-    }
-    const nativeModel =
-      native === model.api ? model : { ...model, api: native };
-    // `transformHeaders` is threaded through request options by Pi core's
-    // streamFn (sdk.ts) but is absent from pi-ai's public option types.
-    const parentTransform = (
-      options as
-        | (SimpleStreamOptions & { transformHeaders?: HeaderTransform })
-        | undefined
-    )?.transformHeaders;
-    const engineOptions = {
-      ...options,
-      transformHeaders: composeZenTransformHeaders(parentTransform),
-    } as SimpleStreamOptions;
-    return engine.streamSimple(nativeModel, context, engineOptions);
-  };
-}
-
 export default function opencodeDirectExtension(pi: ExtensionAPI): void {
   pi.on("before_provider_headers", (event) => {
     applyOpenCodeFreeHeaders(event.headers);
@@ -260,7 +197,9 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
   // (every `opencode-free/*` child then fails with Zen 401 before any tool
   // runs). Register this entry file as a host-required child extension for
   // the current session so children load it like any ordinary extension.
-  // Best-effort: never throws, no-op without pi-subagents installed.
+  // Best-effort: the hook swallows its own internal failures (no-op when
+  // pi-subagents is absent); the try/catch additionally guards `pi.on`
+  // itself so the provider registration below can never be skipped.
   try {
     hookRequiredChildExtension(pi);
   } catch {
