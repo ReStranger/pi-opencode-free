@@ -14,7 +14,12 @@ import {
   type ApiStreamFunction,
   type ApiStreamSimpleFunction,
 } from "@earendil-works/pi-ai/compat";
-import { applyOpenCodeFreeHeaders } from "./zen-headers.js";
+import {
+  applyOpenCodeFreeHeaders,
+  type MutableHeaders,
+  type ZenAuthLane,
+} from "./zen-headers.js";
+import { applyOpenCodeFreeTools } from "./zen-tools.js";
 
 /**
  * Zen engine adapters.
@@ -66,6 +71,15 @@ const ZEN_TO_NATIVE: Record<ZenApi, NativeZenApi> = {
   [ZEN_GOOGLE_API]: "google-generative-ai",
 };
 
+/** Auth lane per backend: the anonymous credential rides a different
+ * header per lane, and a wrong-lane credential is an instant 403. */
+const NATIVE_AUTH_LANE: Record<NativeZenApi, ZenAuthLane> = {
+  "openai-completions": "openai",
+  "openai-responses": "openai",
+  "anthropic-messages": "anthropic",
+  "google-generative-ai": "google",
+};
+
 function hasOwn(obj: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
@@ -111,16 +125,27 @@ export function composeZenTransformHeaders(
 }
 
 /**
- * `transformHeaders` is threaded through request options by Pi core's
- * streamFn (sdk.ts) but is absent from pi-ai's public option types, hence
- * the structural read/cast here (the same one Pi core performs).
+ * Assembles the delegated options: options.headers are stamped directly
+ * with the backend's auth lane (the native engines merge them into their
+ * clients and never invoke `transformHeaders` themselves — pi-ai only
+ * applies that hook on its own Models request path), and the composed
+ * transform stays threaded through for those Models paths anyway.
  */
-function withZenHeaders<O>(options: O): O {
+function withZenHeaders<O>(
+  options: O,
+  nativeApi: NativeZenApi,
+): O {
+  const stamped: MutableHeaders = {
+    ...(((options as { headers?: MutableHeaders } | undefined)?.headers ??
+      {}) as MutableHeaders),
+  };
+  applyOpenCodeFreeHeaders(stamped, NATIVE_AUTH_LANE[nativeApi]);
   const parent = (
     options as { transformHeaders?: HeaderTransform } | undefined
   )?.transformHeaders;
   return {
     ...((options ?? {}) as Record<string, unknown>),
+    headers: stamped,
     transformHeaders: composeZenTransformHeaders(parent),
   } as O;
 }
@@ -162,6 +187,9 @@ export function createZenEngineFunctions(
   };
   // Re-key to the native engine id; all other model fields (provider,
   // baseUrl, compat, ...) travel unchanged so Zen routing is preserved.
+  // The context is shaped for the free tier in the same step: genuine core
+  // OpenCode tools ride every `zen-*` dispatch (pi-ai has no payload
+  // transform, so the tool list is the only request-shaping surface).
   const toNativeModel = (model: Model<Api>): Model<Api> => ({
     ...model,
     api: nativeApi,
@@ -170,7 +198,12 @@ export function createZenEngineFunctions(
     model: Model<Api>,
     context: Context,
     options?: StreamOptions,
-  ) => resolve().stream(toNativeModel(model), context, withZenHeaders(options));
+  ) =>
+    resolve().stream(
+      toNativeModel(model),
+      applyOpenCodeFreeTools(context),
+      withZenHeaders(options, nativeApi),
+    );
   const streamSimple: ApiStreamSimpleFunction = (
     model: Model<Api>,
     context: Context,
@@ -178,8 +211,8 @@ export function createZenEngineFunctions(
   ) =>
     resolve().streamSimple(
       toNativeModel(model),
-      context,
-      withZenHeaders(options),
+      applyOpenCodeFreeTools(context),
+      withZenHeaders(options, nativeApi),
     );
   return { stream, streamSimple };
 }
