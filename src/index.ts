@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { discoverModels, type OpenCodeModelInfo } from "./discovery.js";
 import {
@@ -52,9 +51,13 @@ export const RESPONSES_COMPAT = {
  * `api` points at this extension's `zen-*` engine adapters — the same
  * dispatch as the stock `opencode` provider's native engines, plus the Zen
  * identity stamp on every request (see `./zen-engines.js`). */
+
+// Anthropic SDK appends `/v1/messages`; OpenAI-compatible SDKs append
+// their paths onto the `/v1` root. Both land on the keyless inference host
+// (see zen-headers.ts).
 function toProviderModel(m: OpenCodeModelInfo) {
-  const native = m.api ?? "openai-completions";
-  const api = zenApiForNative(native) ?? ZEN_COMPLETIONS_API;
+    const native = m.api ?? "openai-completions";
+    const api = zenApiForNative(native) ?? ZEN_COMPLETIONS_API;
   return {
     id: m.id.replace(/^opencode\//, ""),
     name: m.name,
@@ -228,11 +231,12 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
   // its own `zen-*` api (applyExtension only falls back here when a
   // snapshot entry lacks one).
   //
-  // Auth: pure keyless. `apiKey: "none"` is only the placeholder Pi core
+  // Auth: keyless. `apiKey: "none"` is only the placeholder Pi core
   // requires (it throws when a provider has no auth method at all); it
   // never reaches the wire — the header hook and the `zen-*` engine
-  // wrappers null `Authorization` on every request. No `authHeader`, so
-  // Pi-native stored keys are never exposed as `Bearer` in headers.
+  // wrappers overwrite the auth headers with the anonymous `public`
+  // credential on every request. No `authHeader`, so Pi-native stored keys
+  // are never exposed as `Bearer` in headers.
   registerZenApiProviders();
   pi.registerProvider(PROVIDER_ID, {
     name: "OpenCode Direct (Free)",
@@ -244,13 +248,13 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
       "x-opencode-project": "global",
       // Fallback identity for request paths with no per-request stamping
       // (defense in depth — every engine stamps via its `zen-*` adapter,
-      // and the hook stamps wherever it runs). Canonical shape (never a
-      // raw Pi session id); the hook and the adapters overwrite both ids
-      // on every request wherever they run. Reuse across requests is safe:
-      // OpenCode itself reuses headers on retry, so Zen cannot be keying
-      // responses off their uniqueness.
+      // and the hook stamps wherever it runs). Descending canonical shape
+      // (never a raw Pi session id); the hook and the adapters overwrite
+      // both ids on every request wherever they run. Reuse across requests
+      // is safe: OpenCode itself reuses headers on retry, so Zen cannot be
+      // keying responses off their uniqueness.
       "x-opencode-session": canonicalSessionId(),
-      "x-opencode-request": `msg_${randomUUID()}`,
+      "x-opencode-session-id": canonicalSessionId(),
       "User-Agent": OPENCODE_USER_AGENT,
     },
     models: [],

@@ -35,21 +35,21 @@ test("registers provider once with empty initial models and no boot fetch", asyn
     assert.equal(fetchCount, 0); // no fetch during extension load
     assert.deepEqual(registeredConfig.models, []); // populated by refreshModels
     assert.equal(registeredConfig.api, "zen-openai-completions"); // per-model default engine (not a dispatch change — every model carries its own zen-* api)
-    assert.equal(registeredConfig.baseUrl, "https://opencode.ai/zen/v1");
+    assert.equal(registeredConfig.baseUrl, "https://opencode.ai/inference/v1");
     assert.equal(registeredConfig.name, "OpenCode Direct (Free)");
-    assert.equal(registeredConfig.apiKey, "none"); // keyless placeholder (Pi core requires an auth method; the hook/wrapper null it on every request)
+    assert.equal(registeredConfig.apiKey, "none"); // keyless placeholder (Pi core requires an auth method; the hook/wrapper replace it on every request)
     assert.equal(registeredConfig.headers["x-opencode-client"], "cli");
     assert.equal(registeredConfig.headers["x-opencode-project"], "global");
-    assert.equal(registeredConfig.headers["User-Agent"], "opencode/1.18.31");
+    assert.equal(registeredConfig.headers["User-Agent"], "opencode/latest/2.0.29/cli");
     assert.match(
       registeredConfig.headers["x-opencode-session"],
       /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, // canonical fallback for paths without per-request stamping (foreground children on non-completions engines)
     );
     assert.match(
-      registeredConfig.headers["x-opencode-request"],
-      /^msg_[0-9a-f-]{36}$/,
+      registeredConfig.headers["x-opencode-session-id"],
+      /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, // descending-encoded: low 12 hex digits end ffe (client Identifier layout)
     );
-    assert.equal(registeredConfig.headers.Authorization, undefined);
+    assert.equal(registeredConfig.headers.Authorization, undefined); // stamped per request
     assert.equal(registeredConfig.authHeader, undefined); // no authHeader: Pi-native stored keys are never exposed as Bearer
     assert.equal(typeof hooks.headersHandler, "function");
     const headers: Record<string, string | null> = {
@@ -63,9 +63,10 @@ test("registers provider once with empty initial models and no boot fetch", asyn
       headers["x-opencode-session"]!,
       /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
     );
-    assert.match(headers["x-opencode-request"]!, /^msg_[0-9a-f-]{36}$/);
-    assert.equal(headers["User-Agent"], "opencode/1.18.31");
-    assert.equal(headers.Authorization, null);
+    assert.equal(headers["x-opencode-session-id"], headers["x-opencode-session"]);
+    assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
+    assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
+    assert.equal(headers.Authorization, "Bearer public"); // anonymous lane credential
     assert.equal(typeof registeredConfig.refreshModels, "function");
     // No provider-level streamSimple: Pi's composer would route solely the
     // default-engine models through it, so stamping lives in the zen-*
@@ -179,7 +180,7 @@ test("cache-only refresh restores persisted snapshot without network", async () 
       id: "minimax-m3-free",
       name: "MiniMax M3 Free",
       api: "anthropic-messages",
-      baseUrl: "https://opencode.ai/zen",
+      baseUrl: "https://opencode.ai/inference",
     };
     const restored = await registeredConfig.refreshModels({
       allowNetwork: false,
@@ -194,7 +195,7 @@ test("cache-only refresh restores persisted snapshot without network", async () 
     assert.equal((restored[0] as any).baseUrl, undefined); // default baseUrl inherited from provider
     assert.equal((restored[1] as any).api, "zen-openai-responses"); // zen engine per model
     assert.equal((restored[2] as any).api, "zen-anthropic-messages");
-    assert.equal((restored[2] as any).baseUrl, "https://opencode.ai/zen"); // non-default baseUrl preserved
+    assert.equal((restored[2] as any).baseUrl, "https://opencode.ai/inference"); // non-default baseUrl preserved
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -426,7 +427,7 @@ test("header hook is a no-op when x-opencode-project is missing", async () => {
   assert.equal(headers["x-opencode-session"], undefined);
 });
 
-test("header hook strips any credential on own traffic (pure keyless)", async () => {
+test('header hook swaps any credential for the anonymous "public" token', async () => {
   const handle = await loadWithHeaderHook();
   const headers: Record<string, string | null> = {
     "x-opencode-client": "cli",
@@ -434,53 +435,70 @@ test("header hook strips any credential on own traffic (pure keyless)", async ()
     Authorization: "Bearer sk-live-user-key",
   };
   handle({ headers });
-  assert.equal(headers.Authorization, null);
+  assert.equal(headers.Authorization, "Bearer public"); // keyless lane credential
   // Identity is still stamped (compaction and normal turns share this path).
   assert.match(
     headers["x-opencode-session"]!,
     /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
   );
-  assert.match(headers["x-opencode-request"]!, /^msg_[0-9a-f-]{36}$/);
-  assert.equal(headers["User-Agent"], "opencode/1.18.31");
+  assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
+  assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
   assert.equal(headers["x-opencode-client"], "cli");
 });
 
-test("header hook nulls lowercase authorization and native api-key headers", async () => {
+test("header hook replaces lowercase authorization and native api-key headers with public", async () => {
   const handle = await loadWithHeaderHook();
   const headers: Record<string, string | null> = {
     "x-opencode-client": "cli",
     "x-opencode-project": "global",
     authorization: "Bearer none", // fetch/Undici-normalized casing
-    "x-api-key": "none",
     "X-Goog-Api-Key": "none",
     "user-agent": "custom/9.9",
   };
   handle({ headers });
   assert.ok(
     !("authorization" in headers),
-    "lowercase authorization must not survive",
+    "lowercase authorization must not survive a google-lane request",
   );
-  assert.equal(headers.Authorization, null);
-  assert.equal(headers["x-api-key"], null);
-  assert.equal(headers["x-goog-api-key"], null); // normalized to lowercase
+  assert.equal(headers["x-goog-api-key"], "public"); // google lane credential
   assert.ok(!("X-Goog-Api-Key" in headers), "mixed-case variant must not survive");
-  assert.equal(headers["User-Agent"], "opencode/1.18.31");
+  assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
   assert.ok(!("user-agent" in headers), "lowercase user-agent must not survive");
 });
 
-test("header hook leaves absent x-api-key alone", async () => {
+test("header hook sends no Bearer credential on the anthropic lane", async () => {
+  // An Authorization header on /v1/messages is an instant 403 (2026-10-14
+  // probing); the anthropic lane is keyed by x-api-key alone.
+  const handle = await loadWithHeaderHook();
+  const headers: Record<string, string | null> = {
+    "x-opencode-client": "cli",
+    "x-opencode-project": "global",
+    authorization: "Bearer none", // fetch/Undici-normalized casing
+    "x-api-key": "none",
+  };
+  handle({ headers });
+  assert.equal(headers["x-api-key"], "public");
+  assert.ok(
+    !("authorization" in headers) && !("Authorization" in headers),
+    "anthropic lane must not carry Authorization",
+  );
+  assert.equal(headers["x-opencode-session-id"], headers["x-opencode-session"]);
+});
+
+test("header hook maps absent lane credentials onto the anonymous token", async () => {
   const handle = await loadWithHeaderHook();
   const headers: Record<string, string | null> = {
     "x-opencode-client": "cli",
     "x-opencode-project": "global",
   };
   handle({ headers });
-  // OpenAI path still nulls to block `apiKey: "none"`; native key headers
-  // stay absent (never added when missing).
-  assert.equal(headers.Authorization, null);
+  // OpenAI path gets the anonymous `public` token (the gate 401s keyless
+  // requests now); native key headers stay absent (never added when missing).
+  assert.equal(headers.Authorization, "Bearer public");
   assert.equal("x-api-key" in headers, false);
   assert.equal("x-goog-api-key" in headers, false);
   assert.ok(headers["x-opencode-session"]);
+  assert.ok(headers["x-opencode-session-id"]);
 });
 
 test("cache-only refresh re-derives anthropic baseUrl from legacy snapshots", async () => {
@@ -516,7 +534,7 @@ test("cache-only refresh re-derives anthropic baseUrl from legacy snapshots", as
     });
     assert.equal(restored.length, 1);
     assert.equal((restored[0] as any).api, "zen-anthropic-messages");
-    assert.equal((restored[0] as any).baseUrl, "https://opencode.ai/zen");
+    assert.equal((restored[0] as any).baseUrl, "https://opencode.ai/inference");
   } finally {
     globalThis.fetch = originalFetch;
   }
