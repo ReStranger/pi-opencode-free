@@ -60,7 +60,7 @@ test("keyless free access applies via header hook and zen engines", async () => 
     Authorization: "Bearer none",
   };
   hook({ headers });
-  assert.equal(headers.Authorization, null);
+  assert.equal(headers.Authorization, "Bearer public");
   assert.equal(headers["x-opencode-client"], "cli");
   assert.match(
     (headers as any)["x-opencode-session"],
@@ -125,7 +125,7 @@ test("models carry zen per-model api with stock-style compat and baseUrl routing
     // Base URLs: default /v1 inherited, Anthropic bare root override.
     assert.equal(hy3?.baseUrl, undefined);
     assert.equal(muse?.baseUrl, undefined);
-    assert.equal(minimax?.baseUrl, "https://opencode.ai/zen");
+    assert.equal(minimax?.baseUrl, "https://opencode.ai/inference");
     assert.equal(gemini?.baseUrl, undefined);
   } finally {
     globalThis.fetch = originalFetch;
