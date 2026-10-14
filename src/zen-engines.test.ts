@@ -101,8 +101,13 @@ test("zen engine adapters stamp and delegate on both stream and streamSimple", a
       stamped["x-opencode-session"],
       /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
     );
-    assert.match(stamped["x-opencode-request"], /^msg_[0-9a-f-]{36}$/);
-    assert.equal(stamped.Authorization, null); // placeholder never leaks
+    assert.equal(
+      stamped["x-opencode-session-id"],
+      stamped["x-opencode-session"], // both headers required since 2026-10-14
+    );
+    assert.equal(stamped["x-opencode-request"], undefined); // instant 403 upstream
+    assert.match(stamped["User-Agent"], /^opencode\/[^/]+\/[^/]+\/cli$/);
+    assert.equal(stamped.Authorization, "Bearer public"); // placeholder never leaks
   }
   assert.equal(parentTransformCalls, 2); // core transform runs inside the stamp
 });
@@ -178,7 +183,7 @@ test("composeZenTransformHeaders without a parent still stamps", async () => {
     "x-opencode-client": "cli",
     "x-opencode-project": "global",
   });
-  assert.equal(out.Authorization, null);
+  assert.equal(out.Authorization, "Bearer public");
   assert.match(
     (out as any)["x-opencode-session"],
     /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
