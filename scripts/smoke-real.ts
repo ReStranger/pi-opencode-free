@@ -19,6 +19,7 @@ import {
   ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
+  canonicalSessionId,
 } from "../src/zen-headers.js";
 import {
   nativeApiForZen,
@@ -34,6 +35,7 @@ registerZenApiProviders();
 const HEADERS = {
   "x-opencode-client": "cli",
   "x-opencode-project": "global",
+  "x-opencode-session": canonicalSessionId(),
   "User-Agent": OPENCODE_USER_AGENT,
 };
 
@@ -54,7 +56,17 @@ function shimStream(model: any, context: Context, options?: any) {
     ...options?.headers,
     ...HEADERS,
   };
-  applyOpenCodeFreeHeaders(headers);
+  // Pre-stamp the way Pi core + the ambient hook would (openai-lane by
+  // default); the zen adapter re-stamps with the backend's real lane next.
+  const native = nativeApiForZen(model.api);
+  applyOpenCodeFreeHeaders(
+    headers,
+    native === "anthropic-messages"
+      ? "anthropic"
+      : native === "google-generative-ai"
+        ? "google"
+        : "openai",
+  );
   return engine.streamSimple(model, context, { ...options, headers });
 }
 
@@ -110,6 +122,55 @@ function check(label: string, ok: boolean, detail = "") {
   if (!ok) failures++;
 }
 
+/** Upstream error text for a failed run (any stopReason). */
+function errorText(final: any): string {
+  const direct = final?.errorMessage ?? "";
+  if (typeof direct === "string") return direct;
+  return JSON.stringify(final); // errors carry nested provider info
+}
+
+const SKIP_PATTERNS = [
+  /does not support this protocol/i, // upstream model/protocol routing, not our lane
+  /Rate limit exceeded/i, // FreeUsageLimitError: gate passed, quota tripped
+];
+
+/** Runs the runner over candidates until one succeeds; frees gate-side skips. */
+async function runModelProbe(
+  label: string,
+  candidates: typeof models,
+  runFn: (m: (typeof models)[number]) => Promise<boolean>,
+) {
+  let sawRateLimitOnly = candidates.length > 0;
+  for (const candidate of candidates) {
+    console.log(`   -- trying ${candidate.id} --`);
+    try {
+      const ok = await runFn(candidate);
+      check(label, ok, `model=${candidate.id}`);
+      return;
+    } catch (error: any) {
+      const text = String(error?.message ?? error);
+      if (/FreeTierError/i.test(text)) {
+        check(label, false, `403 FreeTierError on ${candidate.id}`);
+        return;
+      }
+      if (SKIP_PATTERNS.some((p) => p.test(text))) {
+        sawRateLimitOnly = sawRateLimitOnly && /Rate limit exceeded/i.test(text);
+        console.log(`   -- skip ${candidate.id}: upstream skip (${text.slice(0, 80)}) --`);
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (sawRateLimitOnly) {
+    console.log(`SKIP  ${label} — free-tier quota exhausted on every candidate (gate itself passed; retry later)`);
+  } else {
+    check(label, false, "all candidates skipped (protocol routing)");
+  }
+}
+
+const isSkipable = (final: any): boolean =>
+  SKIP_PATTERNS.some((p) => p.test(errorText(final)));
+
 console.log("== 1. Live model discovery from OpenCode Zen ==");
 const models = await discoverModels();
 console.log(`   endpoint lists ${models.length} free models (all served): ${models.map(m => m.id).join(", ")}`);
@@ -119,17 +180,23 @@ check(
   models.every(m => /(^(opencode\/)?.*-free$)|(^(opencode\/)?big-pickle$)/i.test(m.id)),
 );
 
-const nonReasoning = models.find(m => !m.reasoning) ?? models[0];
-console.log(`\n== 2. Plain chat via zen engine (${nonReasoning.id}) ==`);
-{
-  const { final } = await run(toPiModel(nonReasoning), {
+const nonReasoning = models.filter(m => !m.reasoning);
+// Chat lanes: non-reasoning models first, but any free model may serve the
+// lane (only its own protocol table decides) — fall back to reasoning models.
+const chatCandidates = [...nonReasoning, ...models.filter(m => m.reasoning)];
+console.log("\n== 2. Plain chat via zen engine ==");
+await runModelProbe("plain chat", chatCandidates, async (m) => {
+  const { final } = await run(toPiModel(m), {
     systemPrompt: "You are terse.",
     messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }],
   }, { maxTokens: 200 });
+  if (final?.stopReason === "error" && isSkipable(final)) {
+    throw new Error(errorText(final));
+  }
   const ok = final?.stopReason === "stop" && /OK/i.test(textOf(final));
-  check("chat completion succeeds", ok, `stopReason=${final?.stopReason} text="${textOf(final).trim().slice(0, 60)}"`);
-  check("usage reported", (final?.usage?.output ?? 0) > 0, JSON.stringify(final?.usage));
-}
+  console.log(`      model=${m.id} stopReason=${final?.stopReason} text="${textOf(final).trim().slice(0, 60)}"`);
+  return ok && (final?.usage?.output ?? 0) > 0;
+});
 
 // Prefer reasoning models confirmed alive on the free tier: deepseek is still
 // listed but its free promotion ended server-side and returns 401.
@@ -151,9 +218,9 @@ if (reasoner) {
   console.log("\n== 3. Skipped: no reasoning model with low effort in discovery ==");
 }
 
-const toolModel = models.find(m => !m.reasoning) ?? models[0];
-console.log(`\n== 4. Native tool calling (${toolModel.id}) ==`);
-{
+console.log("\n== 4. Native tool calling ==");
+await runModelProbe("native tool calling", chatCandidates, async (m) => {
+  const model = toPiModel(m);
   const weather: Tool = {
     name: "get_weather",
     description: "Get current weather for a city",
@@ -163,52 +230,56 @@ console.log(`\n== 4. Native tool calling (${toolModel.id}) ==`);
       required: ["city"],
     },
   };
-  const { final } = await run(toPiModel(toolModel), {
+  const { final } = await run(model, {
     systemPrompt: "You must use the get_weather tool to answer weather questions.",
     messages: [{ role: "user", content: "What's the weather in Lisbon?", timestamp: Date.now() }],
     tools: [weather],
   }, { maxTokens: 500 });
-  const call = (final?.content ?? []).find((b: any) => b.type === "toolCall");
-  check("tool call emitted", !!call, call ? `${call.name}(${JSON.stringify(call.arguments)})` : `stopReason=${final?.stopReason}`);
-  check("stopReason is toolUse", final?.stopReason === "toolUse", `got ${final?.stopReason}`);
-
-  if (call) {
-    // Multi-turn: replay assistant toolCall + tool result, expect final answer.
-    console.log("   -- follow-up turn with tool result --");
-    const { final: final2 } = await run(toPiModel(toolModel), {
-      systemPrompt: "You are terse.",
-      messages: [
-        { role: "user", content: "What's the weather in Lisbon?", timestamp: Date.now() },
-        final,
-        {
-          role: "toolResult",
-          toolCallId: call.id,
-          toolName: call.name,
-          content: [{ type: "text", text: "18°C, light rain" }],
-          isError: false,
-          timestamp: Date.now(),
-        },
-      ],
-      tools: [weather],
-    }, { maxTokens: 300 });
-    check("post-tool answer succeeds", final2?.stopReason === "stop" && /rain|18/i.test(textOf(final2)), `stopReason=${final2?.stopReason} text="${textOf(final2).trim().slice(0, 60)}"`);
+  if (final?.stopReason === "error" && isSkipable(final)) {
+    throw new Error(errorText(final));
   }
-}
+  const call = (final?.content ?? []).find((b: any) => b.type === "toolCall");
+  if (!call || final?.stopReason !== "toolUse") {
+    console.log(`      model=${m.id} stopReason=${final?.stopReason} call=${call ? call.name : "none"}`);
+    return false;
+  }
+  console.log(`      model=${m.id} call=${call.name}(${JSON.stringify(call.arguments)})`);
+  if (!call) return false;
+  // Multi-turn: replay assistant toolCall + tool result, expect final answer.
+  console.log("      -- follow-up turn with tool result --");
+  const { final: final2 } = await run(model, {
+    systemPrompt: "You are terse.",
+    messages: [
+      { role: "user", content: "What's the weather in Lisbon?", timestamp: Date.now() },
+      final,
+      {
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: "text", text: "18°C, light rain" }],
+        isError: false,
+        timestamp: Date.now(),
+      },
+    ],
+    tools: [weather],
+  }, { maxTokens: 300 });
+  return final2?.stopReason === "stop" && /rain|18/i.test(textOf(final2));
+});
 
 // Models routed via @ai-sdk/openai (e.g. muse-spark) only answer on Zen's
 // Responses endpoint — exercises the zen openai-responses engine adapter.
-const responsesModel = models.find(m => m.api === "openai-responses");
-if (responsesModel) {
-  console.log(`\n== 5. Responses-API model via zen engine (${responsesModel.id}) ==`);
-  const { final } = await run(toPiModel(responsesModel), {
+const responsesModels = models.filter(m => m.api === "openai-responses");
+console.log("\n== 5. Responses-API models via zen engine ==");
+await runModelProbe("responses completion", responsesModels, async (m) => {
+  const { final } = await run(toPiModel(m), {
     systemPrompt: "You are terse.",
     messages: [{ role: "user", content: "Reply with exactly: RESPONSES_OK", timestamp: Date.now() }],
   }, { maxTokens: 200 });
-  check("responses completion succeeds", final?.stopReason === "stop", `stopReason=${final?.stopReason}`);
-  check("responses answer present", /RESPONSES_OK/i.test(textOf(final)), `"${textOf(final).trim().slice(0, 60)}"`);
-} else {
-  console.log("\n== 5. Skipped: no @ai-sdk/openai-routed model in discovery ==");
-}
+  if (final?.stopReason === "error" && isSkipable(final)) {
+    throw new Error(errorText(final));
+  }
+  return final?.stopReason === "stop" && /RESPONSES_OK/i.test(textOf(final));
+});
 
 console.log(`\n${failures === 0 ? "ALL REAL-SCENARIO CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
