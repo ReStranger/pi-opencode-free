@@ -95,6 +95,62 @@ test("applyOpenCodeFreeTools leaves a fully genuine context unchanged", () => {
   assert.equal(applyOpenCodeFreeTools(context), context); // identity: nothing changed
 });
 
+test("applyOpenCodeFreeTools injects genuine tools into leading system message (compaction request)", () => {
+  // Compaction requests build an isolated TranscriptContext: a system message
+  // with no toolsAdded and no top-level tools.
+  const compactionContext: any = {
+    messages: [
+      {
+        role: "system",
+        content: "You are a context summarization assistant.",
+        timestamp: 0,
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Summarize this." }],
+        timestamp: 1,
+      },
+    ],
+  };
+  const shaped: any = applyOpenCodeFreeTools(compactionContext);
+  const first = shaped.messages?.[0];
+  assert.ok(first?.toolsAdded, "toolsAdded must be populated on system message");
+  const names = (first.toolsAdded as any[]).map((t) => t.name);
+  for (const name of OPENCODE_CORE_TOOL_NAMES) {
+    assert.ok(names.includes(name), `system message toolsAdded includes ${name}`);
+  }
+  // tools array on context is also shaped for compatibility
+  assert.ok(Array.isArray(shaped.tools));
+});
+
+test("applyOpenCodeFreeTools rewrites stubs inside leading system message toolsAdded", () => {
+  const context: any = {
+    messages: [
+      {
+        role: "system",
+        content: "You are helpful.",
+        toolsAdded: [opencodeStub("shell", "fake shell")],
+        timestamp: 0,
+      },
+      {
+        role: "user",
+        content: "hi",
+        timestamp: 1,
+      },
+    ],
+  };
+  const shaped: any = applyOpenCodeFreeTools(context);
+  const first = shaped.messages?.[0];
+  const shell = (first?.toolsAdded as any[] | undefined)?.find(
+    (t) => t.name === "shell",
+  );
+  assert.equal(
+    shell?.description,
+    OPENCODE_TOOL_DEFINITIONS.shell!.description,
+    "stub inside system message toolsAdded must be replaced with genuine definition",
+  );
+});
+
 /** Minimal client-declared tool used to exercise the rewrite path. */
 function opencodeStub(
   name: string,

@@ -85,24 +85,17 @@ function toolName(item: unknown): string | undefined {
 }
 
 /**
- * Shapes a request context for the free tier: every recognised tool name
- * carries the genuine definition (a downstream-declared same-named tool
- * would otherwise fail the definition check), and any missing core tools
- * are appended. Returns the context unchanged when nothing is missing and
- * nothing was rewritten, so plain paid/unknown behavior is never widened.
+ * Normalizes a list of tools for the free tier: every recognised tool name
+ * carries the genuine definition, and any missing core tools are appended.
  */
-export function applyOpenCodeFreeTools(context: Context): Context {
-  const tools = context.tools;
-  if (tools === undefined) {
-    return {
-      ...context,
-      tools: OPENCODE_CORE_TOOL_NAMES.map(opencodeTool),
-    };
-  }
-  if (!Array.isArray(tools)) return context;
+function shapeToolList(tools?: readonly unknown[]): {
+  shaped: Tool[];
+  changed: boolean;
+} {
+  const list = Array.isArray(tools) ? tools : [];
   const shaped: Tool[] = [];
-  let changed = false;
-  for (const item of tools) {
+  let changed = !Array.isArray(tools);
+  for (const item of list) {
     const name = toolName(item);
     if (
       typeof name === "string" &&
@@ -113,16 +106,74 @@ export function applyOpenCodeFreeTools(context: Context): Context {
       changed = true;
       continue;
     }
-    shaped.push(item);
+    if (item && typeof item === "object") {
+      shaped.push(item as Tool);
+    }
   }
   const present = new Set(shaped.map((tool) => tool.name));
-  const missing = OPENCODE_CORE_TOOL_NAMES.filter(
-    (name) => !present.has(name),
-  );
+  const missing = OPENCODE_CORE_TOOL_NAMES.filter((name) => !present.has(name));
   if (missing.length > 0) {
     shaped.push(...missing.map(opencodeTool));
     changed = true;
   }
-  if (!changed) return context;
-  return { ...context, tools: shaped };
+  return { shaped, changed };
+}
+
+/**
+ * Shapes a request context for the free tier: every recognised tool name
+ * carries the genuine definition (a downstream-declared same-named tool
+ * would otherwise fail the definition check), and any missing core tools
+ * are appended.
+ *
+ * In Pi 1.0+, native engines resolve tools from the transcript system
+ * messages (`context.messages[0].toolsAdded` via `resolveTranscriptTools`),
+ * while legacy callers and unit tests inspect top-level `context.tools`.
+ * This helper shapes BOTH:
+ * - `context.tools` is populated with genuine core tools.
+ * - If `context.messages` has a leading system message (including the
+ *   isolated summarization request built by Pi core during /compaction),
+ *   its `toolsAdded` is populated with the shaped core tools.
+ * - If `context.messages` has no leading system message, one is prepended.
+ *
+ * Returns the context unchanged when nothing is missing and nothing was
+ * rewritten, so plain paid/unknown behavior is never widened.
+ */
+export function applyOpenCodeFreeTools(context: Context): Context {
+  const { shaped: shapedTools, changed: toolsChanged } = shapeToolList(
+    context.tools,
+  );
+
+  let messages = context.messages;
+  let messagesChanged = false;
+
+  if (Array.isArray(messages) && messages.length > 0) {
+    const first: unknown = messages[0];
+    const isObject = typeof first === "object" && first !== null;
+    const isSystemRole =
+      isObject && (first as { role?: unknown }).role === "system";
+    if (isSystemRole) {
+      // SAFETY: isSystemRole verified first is an object message.
+      const sysObj = first as Record<string, unknown>;
+      const existing = sysObj.toolsAdded as unknown[] | undefined;
+      const baseForSystem = existing ?? context.tools;
+      const { shaped: systemTools, changed: systemChanged } =
+        shapeToolList(baseForSystem);
+      if (systemChanged || !existing) {
+        // SAFETY: SystemMessage with toolsAdded is a valid transcript entry in pi-ai.
+        const updated = {
+          ...sysObj,
+          toolsAdded: systemTools,
+        } as unknown as (typeof messages)[number];
+        messages = [updated, ...messages.slice(1)];
+        messagesChanged = true;
+      }
+    }
+  }
+
+  if (!toolsChanged && !messagesChanged) return context;
+  return {
+    ...context,
+    tools: shapedTools,
+    ...(messages ? { messages } : {}),
+  };
 }
