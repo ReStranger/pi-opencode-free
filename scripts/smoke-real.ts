@@ -274,7 +274,7 @@ await runModelProbe("responses completion", responsesModels, async (m) => {
   const { final } = await run(toPiModel(m), {
     systemPrompt: "You are terse.",
     messages: [{ role: "user", content: "Reply with exactly: RESPONSES_OK", timestamp: Date.now() }],
-  }, { maxTokens: 200 });
+  }, { maxTokens: 1000 });
   if (final?.stopReason === "error" && isSkipable(final)) {
     throw new Error(errorText(final));
   }
