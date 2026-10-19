@@ -6,8 +6,9 @@
  * Single source of truth for `src/index.ts`, `src/discovery.ts`, and
  * `scripts/smoke-real.ts`.
  *
- * Mirrors the 2026-10-14 free-tier gate contract (verified via
- * jasonxu114514/opencode2api #81-#84): upstream fingerprints the client on
+ * Mirrors the free-tier gate contract (initial 2026-10-14, tools
+ * fingerprint synced 2026-10-19 via jasonxu114514/opencode2api #126): upstream
+ * fingerprints the client on
  * every lane, and each of these alone turns a request into a 403
  * FreeTierError:
  *
@@ -24,6 +25,10 @@
  * 3. Auth — the anonymous credential is the literal token `public`
  *    (case-sensitive), as `Bearer public` on the OpenAI-compatible lanes and
  *    `x-api-key: public` on the Anthropic lane.
+ * 4. Payload — `body.tools` is fingerprinted byte-for-byte against the
+ *    Linux CLI release: the `shell` description must carry the Linux
+ *    `bash` wording, not the Windows `powershell` wording (403 on
+ *    mismatch since 2026-10-19).
  */
 import { randomBytes } from "node:crypto";
 
@@ -40,7 +45,7 @@ const TRUSTED_BASE_URLS = new Set([ZEN_BASE_URL, ZEN_ANTHROPIC_BASE_URL]);
  * range of releases (the version number itself is not validated), kept
  * current with the latest public `@opencode/cli`.
  */
-export const OPENCODE_USER_AGENT = "opencode/latest/2.0.29/cli";
+export const OPENCODE_USER_AGENT = "opencode/latest/2.0.32/cli";
 
 /** Native Pi engines this extension routes models to. */
 export const KNOWN_APIS = new Set([

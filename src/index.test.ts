@@ -40,7 +40,7 @@ test("registers provider once with empty initial models and no boot fetch", asyn
     assert.equal(registeredConfig.apiKey, "none"); // keyless placeholder (Pi core requires an auth method; the hook/wrapper replace it on every request)
     assert.equal(registeredConfig.headers["x-opencode-client"], "cli");
     assert.equal(registeredConfig.headers["x-opencode-project"], "global");
-    assert.equal(registeredConfig.headers["User-Agent"], "opencode/latest/2.0.29/cli");
+    assert.equal(registeredConfig.headers["User-Agent"], "opencode/latest/2.0.32/cli");
     assert.match(
       registeredConfig.headers["x-opencode-session"],
       /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, // canonical fallback for paths without per-request stamping (foreground children on non-completions engines)
@@ -65,7 +65,7 @@ test("registers provider once with empty initial models and no boot fetch", asyn
     );
     assert.equal(headers["x-opencode-session-id"], headers["x-opencode-session"]);
     assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
-    assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
+    assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
     assert.equal(headers.Authorization, "Bearer public"); // anonymous lane credential
     assert.equal(typeof registeredConfig.refreshModels, "function");
     // No provider-level streamSimple: Pi's composer would route solely the
@@ -442,7 +442,7 @@ test('header hook swaps any credential for the anonymous "public" token', async 
     /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
   );
   assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
-  assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
+  assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
   assert.equal(headers["x-opencode-client"], "cli");
 });
 
@@ -462,7 +462,7 @@ test("header hook replaces lowercase authorization and native api-key headers wi
   );
   assert.equal(headers["x-goog-api-key"], "public"); // google lane credential
   assert.ok(!("X-Goog-Api-Key" in headers), "mixed-case variant must not survive");
-  assert.equal(headers["User-Agent"], "opencode/latest/2.0.29/cli");
+  assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
   assert.ok(!("user-agent" in headers), "lowercase user-agent must not survive");
 });
 
