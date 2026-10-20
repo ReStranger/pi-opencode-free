@@ -28,8 +28,8 @@ function makeFakePi() {
 
 test("resolveSelfEntryPath points at an existing entry file", () => {
   const path = resolveSelfEntryPath();
-  assert.ok(path, "expected an entry path in src or dist layout");
-  assert.match(path!, /index\.(js|ts)$/);
+  assert.ok(path, "expected the source entry (src/index.ts) to exist");
+  assert.match(path!, /src\/index\.ts$/);
 });
 
 test("resolveSessionKeys prefers the bare id, file as secondary", () => {

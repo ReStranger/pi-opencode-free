@@ -102,8 +102,14 @@ test("package.json is configured for public release and distribution", () => {
   assert.equal(pkg.private, undefined, "package must not be private");
   assert.equal(pkg.license, "GPL-3.0-or-later");
   assert.deepEqual(pkg.pi?.extensions, ["./index.ts"]);
-  assert.ok(pkg.files?.includes("dist"));
-  assert.ok(pkg.scripts?.prepack);
+  // Pi executes extension sources through jiti, so the npm tarball ships TS
+  // sources only — a compiled dist would be dead weight for every consumer.
+  assert.deepEqual(pkg.files?.filter((f: string) => f.startsWith("dist")), []);
+  assert.ok(pkg.files?.includes("index.ts"));
+  assert.ok(pkg.files?.includes("src"));
+  assert.equal(pkg.scripts?.prepack, undefined, "no pack-time tsc build");
+  assert.equal(pkg.scripts?.build, undefined, "no emit build");
+  assert.ok(pkg.scripts?.typecheck, "keep type-checking sources");
 });
 
 test("every declared extension entry reaches the published tarball", () => {

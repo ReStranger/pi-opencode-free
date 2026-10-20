@@ -43,18 +43,16 @@ export type SessionIdentityLike = {
 
 /**
  * Resolves this extension's entry file (the module the child must load to
- * re-register the provider and the `zen-*` engines). Prefers the built
- * `./index.js` (dist layout) and falls back to `./index.ts` (source
- * checkout); undefined when neither exists.
+ * re-register the provider and the `zen-*` engines). The package ships and
+ * runs as TS sources — Pi loads extensions through jiti, so compiled dist
+ * is never executed; undefined when the source entry cannot be located.
  */
 export function resolveSelfEntryPath(): string | undefined {
-  for (const candidate of ["./index.js", "./index.ts"]) {
-    try {
-      const path = fileURLToPath(new URL(candidate, import.meta.url));
-      if (existsSync(path)) return path;
-    } catch {
-      // Ignore malformed URLs / missing files and try the next candidate.
-    }
+  try {
+    const path = fileURLToPath(new URL("./index.ts", import.meta.url));
+    if (existsSync(path)) return path;
+  } catch {
+    // Ignore malformed URLs.
   }
   return undefined;
 }
