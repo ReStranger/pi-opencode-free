@@ -83,7 +83,7 @@ function timeoutSignal(ms: number): AbortSignal {
 function combineSignals(
   ...signals: (AbortSignal | undefined)[]
 ): AbortSignal | undefined {
-  const list = signals.filter((s): s is AbortSignal => !!s);
+  const list = signals.filter((s): s is AbortSignal => Boolean(s));
   const first = list[0];
   if (!first) return undefined;
   if (list.length === 1) return first;

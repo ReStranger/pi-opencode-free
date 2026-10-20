@@ -47,6 +47,15 @@ export const RESPONSES_COMPAT = {
   sessionAffinityFormat: "openai-nosession" as const,
 };
 
+/** Per-native-engine compat flags (completions quirks for the two OpenAI
+ * lanes, none for Anthropic/Google — see the constants above for the why).
+ * Shared with scripts/smoke-real.ts so the smoke path mirrors prod. */
+export function compatForNative(native: string) {
+  if (native === "openai-responses") return RESPONSES_COMPAT;
+  if (native === "openai-completions") return COMPLETIONS_COMPAT;
+  return undefined;
+}
+
 /** Maps a discovered model to the provider config shape: the per-model
  * `api` points at this extension's `zen-*` engine adapters — the same
  * dispatch as the stock `opencode` provider's native engines, plus the Zen
@@ -75,12 +84,7 @@ function toProviderModel(m: OpenCodeModelInfo) {
     contextWindow: m.contextWindow ?? 128_000,
     maxTokens: m.maxTokens ?? 16_384,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat:
-      native === "openai-responses"
-        ? RESPONSES_COMPAT
-        : native === "openai-completions"
-          ? COMPLETIONS_COMPAT
-          : undefined,
+    compat: compatForNative(native),
   };
 }
 
@@ -93,6 +97,24 @@ function toStoredModel(config: ReturnType<typeof toProviderModel>) {
 }
 
 type ProviderModelConfig = ReturnType<typeof toProviderModel>;
+
+/** Restores this provider's persisted snapshot entries; foreign entries and
+ * invalid shapes are rejected (see `fromStoredModel`). */
+function storedProviderModels(
+  models: readonly unknown[],
+): ProviderModelConfig[] {
+  return models
+    .filter(
+      (m) =>
+        typeof m === "object" &&
+        m !== null &&
+        (m as { provider?: unknown }).provider === PROVIDER_ID,
+    )
+    .flatMap((m): ProviderModelConfig[] => {
+      const config = fromStoredModel(m);
+      return config === null ? [] : [config];
+    });
+}
 
 /** Restores a persisted snapshot entry to provider config shape; null when the entry is not an object. */
 function fromStoredModel(m: unknown): ProviderModelConfig | null {
@@ -260,17 +282,9 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
     models: [],
     async refreshModels(ctx) {
       if (!ctx.allowNetwork) {
-        return (
-          ctx.stored?.models
-            .filter(
-              (m: unknown) =>
-                typeof m === "object" &&
-                m !== null &&
-                (m as { provider?: unknown }).provider === PROVIDER_ID,
-            )
-            .map(fromStoredModel)
-            .filter((m): m is ProviderModelConfig => m !== null) ?? []
-        );
+        return ctx.stored
+          ? storedProviderModels(ctx.stored.models ?? [])
+          : [];
       }
       if (ctx.signal.aborted) return [];
       // Previous snapshot as enrichment fallback: if the 4+ MB models.dev

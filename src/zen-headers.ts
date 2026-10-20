@@ -173,13 +173,16 @@ export function applyOpenCodeFreeHeaders(
   // keyed by `x-api-key` alone and the Google lane by `x-goog-api-key` — a
   // Bearer credential on those lanes is an instant 403. Lane callers state
   // their lane; ambient (hook) callers fall back to presence detection.
-  const effectiveLane: ZenAuthLane =
-    lane ??
-    (getHeader(headers, "x-api-key") !== undefined
-      ? "anthropic"
-      : getHeader(headers, "x-goog-api-key") !== undefined
-        ? "google"
-        : "openai");
+  let effectiveLane: ZenAuthLane;
+  if (lane) {
+    effectiveLane = lane;
+  } else if (getHeader(headers, "x-api-key") !== undefined) {
+    effectiveLane = "anthropic";
+  } else if (getHeader(headers, "x-goog-api-key") !== undefined) {
+    effectiveLane = "google";
+  } else {
+    effectiveLane = "openai";
+  }
   deleteHeader(headers, "authorization");
   if (effectiveLane === "anthropic") {
     deleteHeader(headers, "x-api-key");

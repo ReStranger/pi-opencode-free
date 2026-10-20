@@ -104,6 +104,14 @@ export function nativeApiForZen(api: unknown): NativeZenApi | undefined {
   return ZEN_TO_NATIVE[api];
 }
 
+/** Auth lane for any model api a callers may pass (`zen-*` adapter or native
+ * id); unknown values default to the openai lane. */
+export function authLaneForApi(api: string): ZenAuthLane {
+  const native = nativeApiForZen(api);
+  if (!native) return "openai";
+  return NATIVE_AUTH_LANE[native];
+}
+
 export type HeaderTransform = (
   headers: ProviderHeaders,
 ) => ProviderHeaders | Promise<ProviderHeaders>;

@@ -179,7 +179,7 @@ export function hookRequiredChildExtension(
         const sessionIds = [
           ...new Set(
             [primary, ...secondaries].filter(
-              (id): id is string => typeof id === "string" && !!id,
+              (id): id is string => typeof id === "string" && id !== "",
             ),
           ),
         ];

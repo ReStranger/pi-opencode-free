@@ -22,13 +22,14 @@ import {
   canonicalSessionId,
 } from "../src/zen-headers.js";
 import {
+  authLaneForApi,
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
   ZEN_COMPLETIONS_API,
 } from "../src/zen-engines.js";
 // Imported, never mirrored: compat flags must match production exactly.
-import { COMPLETIONS_COMPAT, RESPONSES_COMPAT } from "../src/index.js";
+import { compatForNative } from "../src/index.js";
 
 registerZenApiProviders();
 
@@ -56,23 +57,16 @@ function shimStream(model: any, context: Context, options?: any) {
     ...options?.headers,
     ...HEADERS,
   };
-  // Pre-stamp the way Pi core + the ambient hook would (openai-lane by
-  // default); the zen adapter re-stamps with the backend's real lane next.
-  const native = nativeApiForZen(model.api);
-  applyOpenCodeFreeHeaders(
-    headers,
-    native === "anthropic-messages"
-      ? "anthropic"
-      : native === "google-generative-ai"
-        ? "google"
-        : "openai",
-  );
+  // Pre-stamp the way Pi core + the ambient hook would (the model's own
+  // auth lane; unknown apis default to the openai lane); the zen adapter
+  // re-stamps with the backend's real lane next.
+  applyOpenCodeFreeHeaders(headers, authLaneForApi(model.api));
   return engine.streamSimple(model, context, { ...options, headers });
 }
 
 function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
-  // Mirrors src/index.ts toProviderModel (model SHAPE only — the compat and
-  // engine constants above/below are imported, not copied): zen-* engine
+  // Mirrors src/index.ts toProviderModel (model SHAPE only — engine routing
+  // and compat come from the imported shared helpers, not copied): zen-* engine
   // routing with stock-style compat/baseUrl (completions quirks apply only
   // to openai-completions; Anthropic/Google engines get no compat).
   const api = zenApiForNative(m.api ?? "openai-completions") ?? ZEN_COMPLETIONS_API;
@@ -90,12 +84,7 @@ function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
     contextWindow: m.contextWindow ?? 128_000,
     maxTokens: m.maxTokens ?? 16_384,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat:
-      native === "openai-responses"
-        ? RESPONSES_COMPAT
-        : native === "openai-completions"
-          ? COMPLETIONS_COMPAT
-          : undefined,
+    compat: compatForNative(native),
     headers: HEADERS,
   };
 }
