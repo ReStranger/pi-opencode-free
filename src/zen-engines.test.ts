@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  composeZenAnthropicFetch,
   composeZenTransformHeaders,
   createZenEngineFunctions,
   isNativeZenApi,
@@ -9,11 +10,13 @@ import {
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
+  withAnthropicBeta,
   ZEN_ANTHROPIC_API,
   ZEN_COMPLETIONS_API,
   ZEN_GOOGLE_API,
   ZEN_RESPONSES_API,
 } from "#src/zen-engines.ts";
+import { ZEN_ANTHROPIC_BASE_URL } from "#src/zen-headers.ts";
 
 test("native/zen api mapping round-trips on all four backends", async () => {
   assert.equal(zenApiForNative("openai-completions"), ZEN_COMPLETIONS_API);
@@ -188,4 +191,75 @@ test("composeZenTransformHeaders without a parent still stamps", async () => {
     (out as any)["x-opencode-session"],
     /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
   );
+});
+
+test("withAnthropicBeta appends beta=true and preserves the existing query", () => {
+  assert.equal(
+    withAnthropicBeta("https://opencode.ai/inference/v1/messages?api=1"),
+    "https://opencode.ai/inference/v1/messages?api=1&beta=true",
+  );
+  // Already flagged: returned unchanged (no double decoration).
+  assert.equal(
+    withAnthropicBeta("https://opencode.ai/inference/v1/messages?beta=true"),
+    "https://opencode.ai/inference/v1/messages?beta=true",
+  );
+  // Not parseable as a URL: returned as received.
+  assert.equal(withAnthropicBeta("not a url"), "not a url");
+});
+
+test("anthropic lane rides beta=true only on the Zen base", async () => {
+  const seen: string[] = [];
+  const parentFetch = ((input: any) => {
+    seen.push(String(input));
+    return {} as any;
+  }) as unknown as typeof fetch;
+  let captured: any = null;
+  const functions = createZenEngineFunctions("anthropic-messages", () => ({
+    stream: ((_model: any, _context: any, options: any) => {
+      captured = options;
+      return {} as any;
+    }) as any,
+    streamSimple: undefined as any,
+  }));
+  (functions.stream as any)(
+    { api: ZEN_ANTHROPIC_API, provider: "opencode-free", id: "x" },
+    [],
+    { fetch: parentFetch } as any,
+  );
+  const composed = captured?.fetch as
+    | ((input: any, init?: any) => Promise<unknown>)
+    | undefined;
+  assert.ok(composed, "delegated options carry the composed fetch");
+  assert.notEqual(composed, parentFetch as unknown);
+  // Zen base: beta=true appended, existing query preserved.
+  await composed("https://opencode.ai/inference/v1/messages?api=1");
+  // Foreign host passes through byte-identical.
+  await composed(new URL("https://example.com/v1/messages?x=1"));
+  // Zen base already carrying beta=true is not decorated twice.
+  await composed("https://opencode.ai/inference/v1/messages?beta=true");
+  assert.deepEqual(seen, [
+    "https://opencode.ai/inference/v1/messages?api=1&beta=true",
+    "https://example.com/v1/messages?x=1",
+    "https://opencode.ai/inference/v1/messages?beta=true",
+  ]);
+});
+
+test("composeZenAnthropicFetch rewrites only the Zen base and passes the rest through", async () => {
+  const seen: string[] = [];
+  const parentFetch = ((input: any) => {
+    seen.push(String(input));
+    return {} as any;
+  }) as unknown as typeof fetch;
+  const composed = composeZenAnthropicFetch(parentFetch);
+  // Zen base (string input): beta=true appended, existing query preserved.
+  await composed(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1`);
+  // URL object input, foreign host: passes through byte-identical.
+  await composed(new URL("https://example.com/v1/messages?x=1"));
+  // Already-flagged Zen endpoint: not decorated twice.
+  await composed(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`);
+  assert.deepEqual(seen, [
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1&beta=true`,
+    "https://example.com/v1/messages?x=1",
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`,
+  ]);
 });

@@ -6,7 +6,7 @@ import {
   ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
-  canonicalSessionId,
+  zenRootSession,
   isKnownApi,
   isTrustedBaseUrl,
 } from "#src/zen-headers.ts";
@@ -271,12 +271,13 @@ export default function opencodeDirectExtension(pi: ExtensionAPI): void {
       // Fallback identity for request paths with no per-request stamping
       // (defense in depth — every engine stamps via its `zen-*` adapter,
       // and the hook stamps wherever it runs). Descending canonical shape
-      // (never a raw Pi session id); the hook and the adapters overwrite
-      // both ids on every request wherever they run. Reuse across requests
-      // is safe: OpenCode itself reuses headers on retry, so Zen cannot be
-      // keying responses off their uniqueness.
-      "x-opencode-session": canonicalSessionId(),
-      "x-opencode-session-id": canonicalSessionId(),
+      // (never a raw Pi session id), and the same process-stable root as
+      // the stamp rewrites into all four ids wherever it runs (upstream
+      // renders x-opencode-session as the root and x-opencode-session-id
+      // as the client's own child id, which coincide on a childless
+      // host-side client).
+      "x-opencode-session": zenRootSession(),
+      "x-opencode-session-id": zenRootSession(),
       "User-Agent": OPENCODE_USER_AGENT,
     },
     models: [],

@@ -7,8 +7,8 @@
  * `scripts/smoke-real.ts`.
  *
  * Mirrors the free-tier gate contract (initial 2026-10-14, tools
- * fingerprint synced 2026-10-19 via jasonxu114514/opencode2api #126): upstream
- * fingerprints the client on
+ * fingerprint synced 2026-10-19, v2 client shape synced 2026-10-20 via
+ * jasonxu114514/opencode2api #126): upstream fingerprints the client on
  * every lane, and each of these alone turns a request into a 403
  * FreeTierError:
  *
@@ -16,12 +16,19 @@
  *    `https://opencode.ai/inference` (`/v1/chat/completions`,
  *    `/v1/responses`, `/v1/messages`). The models listing is still served
  *    from the legacy Zen console (`/zen/v1/models`), so discovery keeps its
- *    own URL.
- * 2. Header shape — `opencode/<channel>/<version>/<name>` User-Agent,
- *    `x-opencode-session` AND `x-opencode-session-id` carrying the same
- *    descending-encoded session id, a non-canonical `x-opencode-project`
- *    (the client's own `global` passes), and NO `x-opencode-request`.
- *    Legacy values (`opencode/1.18.31`, canonical `prj_*` project ids) 403.
+ *    own URL. Anthropic messages requests additionally ride `?beta=true`
+ *    (set by the `zen-*` engine adapter, see `./zen-engines.js`).
+ * 2. Header shape — `Accept: application/json, text/event-stream`,
+ *    `opencode/<channel>/<version>/<name>` User-Agent, a non-canonical
+ *    `x-opencode-project` (the client's own `global` passes), the session
+ *    identity under `x-opencode-session` + `x-opencode-session-id` (one
+ *    stable per-process id — the genuine client reuses its session for the
+ *    life of its process; an id minted fresh per request reads as a new
+ *    handshake every time), and NO `x-opencode-request`. On the Anthropic
+ *    lane the v2 client pins a fixed beta set (`anthropic-beta:
+ *    interleaved-thinking-2025-05-14`) and `anthropic-version:
+ *    2023-06-01`. Legacy values (`opencode/1.18.31`, canonical `prj_*`
+ *    project ids) 403.
  * 3. Auth — the anonymous credential is the literal token `public`
  *    (case-sensitive), as `Bearer public` on the OpenAI-compatible lanes and
  *    `x-api-key: public` on the Anthropic lane.
@@ -46,6 +53,17 @@ const TRUSTED_BASE_URLS = new Set([ZEN_BASE_URL, ZEN_ANTHROPIC_BASE_URL]);
  * current with the latest public `@opencode/cli`.
  */
 export const OPENCODE_USER_AGENT = "opencode/latest/2.0.32/cli";
+
+/**
+ * The fixed beta set the v2 free-tier client sends on Anthropic messages
+ * requests. The genuine client derives per-request betas elsewhere, but the
+ * gate only recognises this single flag on the keyless lane — a wider set
+ * (e.g. fine-grained tool streaming) is rejected, so it overrides whatever
+ * the engine would otherwise advertise.
+ */
+export const ANTHROPIC_BETA = "interleaved-thinking-2025-05-14";
+/** Anthropic API version the v2 lane pins alongside the beta set. */
+export const ANTHROPIC_VERSION = "2023-06-01";
 
 /** Native Pi engines this extension routes models to. */
 export const KNOWN_APIS = new Set([
@@ -98,6 +116,20 @@ export function canonicalSessionId(): string {
   return `ses_${timePart}${suffix}`;
 }
 
+let rootSession: string | undefined;
+
+/**
+ * The process-scoped session identity: minted once and reused for the life
+ * of the process, like the genuine OpenCode client, which fixes its session
+ * id for a whole conversation. A fresh id on every request would read as a
+ * new handshake each time (the v2 sync treats per-request ids as a foreign
+ * client signal); per-request minting was the pre-sync behavior.
+ */
+export function zenRootSession(): string {
+  rootSession ??= canonicalSessionId();
+  return rootSession;
+}
+
 /** Same shape as pi-ai `ProviderHeaders`; kept local to avoid subpath imports. */
 export type MutableHeaders = Record<string, string | null>;
 
@@ -139,10 +171,11 @@ export function deleteHeader(headers: MutableHeaders, name: string): void {
  * the OpenCode identity headers our provider sets; foreign traffic
  * (no `x-opencode-client`/`x-opencode-project`) is left untouched.
  *
- * Mirrors the official client's header set exactly: `x-opencode-session`
- * plus `x-opencode-session-id` (both required since 2026-10-14) carrying the
- * same descending-encoded id, and no `x-opencode-request` (its presence is
- * an instant 403). The anonymous credential `public` rides the auth header
+ * Mirrors the official client's header set exactly: `Accept` set to the
+ * streaming-capable value, `x-opencode-session` plus
+ * `x-opencode-session-id` (both required since 2026-10-14) carrying the
+ * same descending-encoded per-process id, and no `x-opencode-request`
+ * (its presence is an instant 403). The anonymous credential `public` rides the auth header
  * each lane expects — `Bearer public` on OpenAI-compatible traffic only:
  * an `Authorization` header on the Anthropic/Google lanes is itself a 403.
  */
@@ -156,7 +189,16 @@ export function applyOpenCodeFreeHeaders(
   // Identity first: compaction/summarization and normal turns share this path.
   // Pi's attribution may have set `x-opencode-client: pi`; restore `cli`.
   headers["x-opencode-client"] = "cli";
-  const session = canonicalSessionId();
+  headers["Accept"] = "application/json, text/event-stream";
+  // One stable session identity for the whole process (see zenRootSession).
+  // Upstream renders the v2 client as: root (parent when present, else own)
+  // under `x-opencode-session`, `x-session-affinity` and `X-Session-Id`, and
+  // the request's own child id under `x-opencode-session-id`. This host
+  // client knows no parent sessions (Pi sessions don't travel in headers),
+  // and has one conversation per process — so the child id falls back to
+  // the root and all four ids coincide, exactly the childless-client shape
+  // the upstream gateway renders.
+  const session = zenRootSession();
   headers["x-opencode-session"] = session;
   headers["x-opencode-session-id"] = session;
   headers["x-session-affinity"] = session;
@@ -187,6 +229,12 @@ export function applyOpenCodeFreeHeaders(
   if (effectiveLane === "anthropic") {
     deleteHeader(headers, "x-api-key");
     headers["x-api-key"] = "public";
+    // The v2 client pins a fixed beta set on messages requests (upstream
+    // overrides whatever dynamic list an SDK would derive) and the
+    // matching API version. Pi-ai merges options headers last, so these
+    // win over its own derived values.
+    headers["anthropic-beta"] = ANTHROPIC_BETA;
+    headers["anthropic-version"] = ANTHROPIC_VERSION;
   } else if (effectiveLane === "google") {
     deleteHeader(headers, "x-goog-api-key");
     headers["x-goog-api-key"] = "public";

@@ -15,6 +15,7 @@ import {
   type ApiStreamSimpleFunction,
 } from "@earendil-works/pi-ai/compat";
 import {
+  ZEN_ANTHROPIC_BASE_URL,
   applyOpenCodeFreeHeaders,
   type MutableHeaders,
   type ZenAuthLane,
@@ -112,6 +113,48 @@ export function authLaneForApi(api: string): ZenAuthLane {
   return NATIVE_AUTH_LANE[native];
 }
 
+/** FetchFunction of pi-ai StreamOptions; defaults to globalThis.fetch. */
+type ZenFetch = NonNullable<StreamOptions["fetch"]>;
+
+/**
+ * Mirrors the OpenCode 2.x client (upstream `withAnthropicBeta`): the
+ * messages endpoint rides a `beta=true` query while any query a configured
+ * base URL already carries is preserved. Applied only on the Zen anthropic
+ * base — traffic to any other host passes through untouched.
+ */
+export function withAnthropicBeta(endpoint: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return endpoint;
+  }
+  if (parsed.searchParams.get("beta") === "true") return endpoint;
+  parsed.searchParams.set("beta", "true");
+  return parsed.toString();
+}
+
+/**
+ * Composes the anthropic-lane fetch: appends `beta=true` to Zen messages
+ * requests (the v2 client marks the endpoint beta the same way) and
+ * delegates everything else — including any caller-provided fetch — as is.
+ */
+export function composeZenAnthropicFetch(
+  parent?: ZenFetch | undefined,
+): ZenFetch {
+  const fetchFn = parent ?? globalThis.fetch.bind(globalThis);
+  return (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : String(input);
+    if (!url.startsWith(ZEN_ANTHROPIC_BASE_URL)) return fetchFn(input, init);
+    return fetchFn(withAnthropicBeta(url), init);
+  };
+}
+
 export type HeaderTransform = (
   headers: ProviderHeaders,
 ) => ProviderHeaders | Promise<ProviderHeaders>;
@@ -151,11 +194,20 @@ function withZenHeaders<O>(
   const parent = (
     options as { transformHeaders?: HeaderTransform } | undefined
   )?.transformHeaders;
-  return {
+  const composed: Record<string, unknown> = {
     ...((options ?? {}) as Record<string, unknown>),
     headers: stamped,
     transformHeaders: composeZenTransformHeaders(parent),
-  } as O;
+  };
+  // The anthropic backend rides `?beta=true` on the Zen base, the way the
+  // 2.x client marks its messages endpoint (other lanes and any non-Zen
+  // base URL are left untouched).
+  if (nativeApi === "anthropic-messages") {
+    composed.fetch = composeZenAnthropicFetch(
+      (composed as { fetch?: ZenFetch }).fetch,
+    );
+  }
+  return composed as O;
 }
 
 export type EngineResolver = (
