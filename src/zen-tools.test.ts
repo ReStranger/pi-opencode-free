@@ -151,6 +151,23 @@ test("applyOpenCodeFreeTools rewrites stubs inside leading system message toolsA
   );
 });
 
+test("the v2 catalog covers `patch` without adding it to the core toolset", () => {
+  // opencode2api f0f064f: the v2 gateway catalog gained a `patch` entry.
+  assert.ok(isKnownOpencodeToolName("patch"));
+  // It is a client-side tool, never injected: the core toolset stays five.
+  assert.equal((OPENCODE_CORE_TOOL_NAMES as readonly string[]).includes("patch"), false);
+  const shaped = applyOpenCodeFreeTools({
+    messages: [],
+    tools: [opencodeStub("patch", "mine")],
+  });
+  const patch = shaped.tools!.find((tool) => tool.name === "patch")!;
+  assert.notEqual(patch.description, "mine");
+  assert.equal(patch.description, OPENCODE_TOOL_DEFINITIONS.patch!.description);
+  assert.deepEqual(patch.parameters, OPENCODE_TOOL_DEFINITIONS.patch!.parameters);
+  // The entry is the fingerprinted upstream text (non-breaking U+2011 hyphens).
+  assert.ok(OPENCODE_TOOL_DEFINITIONS.patch!.description.includes("stripped\u2011down"));
+});
+
 /** Minimal client-declared tool used to exercise the rewrite path. */
 function opencodeStub(
   name: string,
