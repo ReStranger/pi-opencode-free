@@ -7,7 +7,7 @@ import {
   opencodeTool,
   OPENCODE_CORE_TOOL_NAMES,
   OPENCODE_TOOL_DEFINITIONS,
-} from "./zen-tools.js";
+} from "#src/zen-tools.js";
 
 test("genuine definitions cover the core toolset and are substantive", () => {
   for (const name of OPENCODE_CORE_TOOL_NAMES) {

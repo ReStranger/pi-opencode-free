@@ -13,7 +13,7 @@
  * levels until the next successful catalog fetch.
  */
 
-import { OPENCODE_USER_AGENT } from "./zen-headers.js";
+import { OPENCODE_USER_AGENT } from "#src/zen-headers.js";
 
 export interface OpenCodeModelInfo {
   id: string;

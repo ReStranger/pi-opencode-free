@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
-import opencodeDirectExtension from "./index.js";
-import { discoverModels } from "./discovery.js";
+import opencodeDirectExtension from "#src/index.js";
+import { discoverModels } from "#src/discovery.js";
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
 
 type HeaderEvent = { headers: Record<string, string | null> };
@@ -102,6 +102,11 @@ test("package.json is configured for public release and distribution", () => {
   assert.equal(pkg.private, undefined, "package must not be private");
   assert.equal(pkg.license, "GPL-3.0-or-later");
   assert.deepEqual(pkg.pi?.extensions, ["./index.ts"]);
+  assert.deepEqual(
+    pkg.imports,
+    { "#src/*": "./src/*" },
+    "internal imports stay root-anchored via subpath imports",
+  );
   // Pi executes extension sources through jiti, so the npm tarball ships TS
   // sources only — a compiled dist would be dead weight for every consumer.
   assert.deepEqual(pkg.files?.filter((f: string) => f.startsWith("dist")), []);

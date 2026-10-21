@@ -13,23 +13,23 @@ import type {
   Model,
   Tool,
 } from "@earendil-works/pi-ai";
-import { discoverModels } from "../src/discovery.js";
+import { discoverModels } from "#src/discovery.js";
 import {
   OPENCODE_USER_AGENT,
   ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
   canonicalSessionId,
-} from "../src/zen-headers.js";
+} from "#src/zen-headers.js";
 import {
   authLaneForApi,
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
   ZEN_COMPLETIONS_API,
-} from "../src/zen-engines.js";
+} from "#src/zen-engines.js";
 // Imported, never mirrored: compat flags must match production exactly.
-import { compatForNative } from "../src/index.js";
+import { compatForNative } from "#src/index.js";
 
 registerZenApiProviders();
 

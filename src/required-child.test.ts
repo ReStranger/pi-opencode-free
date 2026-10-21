@@ -7,7 +7,7 @@ import {
   hookRequiredChildExtension,
   resolveSelfEntryPath,
   resolveSessionKeys,
-} from "./required-child.js";
+} from "#src/required-child.js";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 

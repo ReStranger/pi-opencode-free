@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels, type OpenCodeModelInfo } from "./discovery.js";
+import { discoverModels, type OpenCodeModelInfo } from "#src/discovery.js";
 import {
   OPENCODE_USER_AGENT,
   ZEN_ANTHROPIC_BASE_URL,
@@ -9,22 +9,22 @@ import {
   canonicalSessionId,
   isKnownApi,
   isTrustedBaseUrl,
-} from "./zen-headers.js";
+} from "#src/zen-headers.js";
 import {
   ZEN_ANTHROPIC_API,
   ZEN_COMPLETIONS_API,
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
-} from "./zen-engines.js";
-import { hookRequiredChildExtension } from "./required-child.js";
+} from "#src/zen-engines.js";
+import { hookRequiredChildExtension } from "#src/required-child.js";
 
 // Re-exported for scripts/smoke-real.ts so the smoke path mirrors prod.
 export {
   OPENCODE_USER_AGENT,
   applyOpenCodeFreeHeaders,
   canonicalSessionId,
-} from "./zen-headers.js";
+} from "#src/zen-headers.js";
 
 const PROVIDER_ID = "opencode-free";
 

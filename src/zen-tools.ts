@@ -17,7 +17,7 @@
  * Tool order is irrelevant and extra client tools are allowed.
  */
 import type { Context, Tool } from "@earendil-works/pi-ai";
-import definitions from "./opencode-tools.json" with { type: "json" };
+import definitions from "#src/opencode-tools.json" with { type: "json" };
 
 interface OpenCodeToolDefinition {
   description: string;

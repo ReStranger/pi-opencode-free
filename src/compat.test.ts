@@ -5,7 +5,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import opencodeDirectExtension, {
   COMPLETIONS_COMPAT,
   RESPONSES_COMPAT,
-} from "./index.js";
+} from "#src/index.js";
 
 // Zen request invariants, asserted against the extension's REAL code
 // (compat constants + toProviderModel output), not local mirrors.
