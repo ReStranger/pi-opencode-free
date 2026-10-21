@@ -9,10 +9,11 @@ The Pi CLI already ships an `opencode` provider, but through it the models only 
 > Pure keyless: no key, no account, no paid plan. Zen's free-tier gate
 > fingerprints the client on every lane (as of 2026-10-14, `body.tools`
 > fingerprint added 2026-10-19, v2 client render 2026-10-20 via
-> `jasonxu114514/opencode2api` #126 — the streaming `Accept` header, per-process
-> session reuse (a fresh id per request reads as a foreign client), and the
-> Anthropic `anthropic-beta`/`anthropic-version` pins with `?beta=true` on
-> messages requests); this extension
+> `jasonxu114514/opencode2api` PR #130 (`c780e68`) + `f0f064f` — per-process
+> session reuse (a fresh id per request reads as a foreign client), the single
+> fixed Anthropic `anthropic-beta` with `anthropic-version`, `?beta=true` on
+> messages requests; the streaming `Accept` follows the genuine 2.0.32
+> client); this extension
 > mirrors the official OpenCode client exactly — the `opencode/<channel>/<version>/<cli>`
 > User-Agent (currently `2.0.32`), descending-encoded session ids (`x-opencode-session` +
 > `x-opencode-session-id`), no `x-opencode-request`, the anonymous `public`
@@ -44,12 +45,12 @@ managed natively by Pi: it loads instantly from a persisted snapshot and
 refreshes itself in the background on interactive startup or when opening
 the model selector.
 
-## v2 sync (2026-10-20)
+## v2 sync (upstream 2026-10-20, ported 2026-10-21)
 
 Contract pinned against the upstream renderer
-([opencode2api #126](https://github.com/jasonxu114514/opencode2api/pull/126), commit
-`f0f064f`; upstream refs `c780e68`, `3e83185`, `fa9a255`, `8cc5e96`, `0bb23c7`,
-`ea947bc`, `d04ff33`):
+([opencode2api PR #130](https://github.com/jasonxu114514/opencode2api/pull/130), commits
+`c780e68` + `f0f064f` — the older 2026-10-18 render is #126; the N/A-fixes wave
+is `3e83185`, `fa9a255`, `8cc5e96`, `0bb23c7`, `ea947bc`, `d04ff33`):
 
 | Change | Where here |
 |--------|------------|
