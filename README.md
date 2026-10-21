@@ -49,7 +49,7 @@ the model selector.
 Contract pinned against the upstream renderer
 ([opencode2api #126](https://github.com/jasonxu114514/opencode2api/pull/126), commit
 `f0f064f`; upstream refs `c780e68`, `3e83185`, `fa9a255`, `8cc5e96`, `0bb23c7`,
-`ea947bc`):
+`ea947bc`, `d04ff33`):
 
 | Change | Where here |
 |--------|------------|
