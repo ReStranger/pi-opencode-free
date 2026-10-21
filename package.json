@@ -29,6 +29,7 @@
     ]
   },
   "imports": {
+    "#index": "./index.ts",
     "#src/*": "./src/*"
   },
   "scripts": {

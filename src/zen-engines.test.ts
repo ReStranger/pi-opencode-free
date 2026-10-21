@@ -13,7 +13,7 @@ import {
   ZEN_COMPLETIONS_API,
   ZEN_GOOGLE_API,
   ZEN_RESPONSES_API,
-} from "#src/zen-engines.js";
+} from "#src/zen-engines.ts";
 
 test("native/zen api mapping round-trips on all four backends", async () => {
   assert.equal(zenApiForNative("openai-completions"), ZEN_COMPLETIONS_API);

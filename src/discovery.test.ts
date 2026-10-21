@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import test from "node:test";
-import { discoverModels, filterFreeModels } from "#src/discovery.js";
+import { discoverModels, filterFreeModels } from "#src/discovery.ts";
 
 test("filterFreeModels filters free models with conservative default metadata", () => {
   const input = [

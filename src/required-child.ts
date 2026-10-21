@@ -49,7 +49,7 @@ export type SessionIdentityLike = {
  */
 export function resolveSelfEntryPath(): string | undefined {
   try {
-    const path = fileURLToPath(new URL("./index.ts", import.meta.url));
+    const path = fileURLToPath(new URL("../index.ts", import.meta.url));
     if (existsSync(path)) return path;
   } catch {
     // Ignore malformed URLs.

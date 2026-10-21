@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
-import opencodeDirectExtension from "#src/index.js";
-import { discoverModels } from "#src/discovery.js";
+import opencodeDirectExtension from "#index";
+import { discoverModels } from "#src/discovery.ts";
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
 
 type HeaderEvent = { headers: Record<string, string | null> };
@@ -104,7 +104,7 @@ test("package.json is configured for public release and distribution", () => {
   assert.deepEqual(pkg.pi?.extensions, ["./index.ts"]);
   assert.deepEqual(
     pkg.imports,
-    { "#src/*": "./src/*" },
+    { "#index": "./index.ts", "#src/*": "./src/*" },
     "internal imports stay root-anchored via subpath imports",
   );
   // Pi executes extension sources through jiti, so the npm tarball ships TS

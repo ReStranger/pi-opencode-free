@@ -13,23 +13,23 @@ import type {
   Model,
   Tool,
 } from "@earendil-works/pi-ai";
-import { discoverModels } from "#src/discovery.js";
+import { discoverModels } from "#src/discovery.ts";
 import {
   OPENCODE_USER_AGENT,
   ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
   canonicalSessionId,
-} from "#src/zen-headers.js";
+} from "#src/zen-headers.ts";
 import {
   authLaneForApi,
   nativeApiForZen,
   registerZenApiProviders,
   zenApiForNative,
   ZEN_COMPLETIONS_API,
-} from "#src/zen-engines.js";
+} from "#src/zen-engines.ts";
 // Imported, never mirrored: compat flags must match production exactly.
-import { compatForNative } from "#src/index.js";
+import { compatForNative } from "#index";
 
 registerZenApiProviders();
 
@@ -41,7 +41,7 @@ const HEADERS = {
 };
 
 /**
- * Mirrors src/index.ts: per-model api selects the registered `zen-*` engine
+ * Mirrors root index.ts: per-model api selects the registered `zen-*` engine
  * adapter (stamping + native dispatch). Headers are pre-stamped here the
  * way Pi core's streamFn + before_provider_headers hook would stamp them in
  * production; the adapter's composed transform then stamps them again on
@@ -65,7 +65,7 @@ function shimStream(model: any, context: Context, options?: any) {
 }
 
 function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
-  // Mirrors src/index.ts toProviderModel (model SHAPE only — engine routing
+  // Mirrors root index.ts toProviderModel (model SHAPE only — engine routing
   // and compat come from the imported shared helpers, not copied): zen-* engine
   // routing with stock-style compat/baseUrl (completions quirks apply only
   // to openai-completions; Anthropic/Google engines get no compat).

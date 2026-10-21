@@ -7,7 +7,7 @@ import {
   hookRequiredChildExtension,
   resolveSelfEntryPath,
   resolveSessionKeys,
-} from "#src/required-child.js";
+} from "#src/required-child.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -28,8 +28,9 @@ function makeFakePi() {
 
 test("resolveSelfEntryPath points at an existing entry file", () => {
   const path = resolveSelfEntryPath();
-  assert.ok(path, "expected the source entry (src/index.ts) to exist");
-  assert.match(path!, /src\/index\.ts$/);
+  assert.ok(path, "expected the package-root entry (index.ts) to exist");
+  assert.match(path!, /\/index\.ts$/);
+  assert.ok(!path!.includes("/src/"), "entry no longer lives in src/");
 });
 
 test("resolveSessionKeys prefers the bare id, file as secondary", () => {

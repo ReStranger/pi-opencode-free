@@ -18,8 +18,8 @@ import {
   applyOpenCodeFreeHeaders,
   type MutableHeaders,
   type ZenAuthLane,
-} from "#src/zen-headers.js";
-import { applyOpenCodeFreeTools } from "#src/zen-tools.js";
+} from "#src/zen-headers.ts";
+import { applyOpenCodeFreeTools } from "#src/zen-tools.ts";
 
 /**
  * Zen engine adapters.
