@@ -21,7 +21,7 @@ import {
   type MutableHeaders,
   type ZenAuthLane,
 } from "#src/zen-headers.ts";
-import { applyOpenCodeFreeTools } from "#src/zen-tools.ts";
+import { applyOpenCodeFreeContext } from "#src/zen-tools.ts";
 
 /**
  * Zen engine adapters.
@@ -361,8 +361,9 @@ export function createZenEngineFunctions(
   // Re-key to the native engine id; all other model fields (provider,
   // baseUrl, compat, ...) travel unchanged so Zen routing is preserved.
   // The context is shaped for the free tier in the same step: genuine core
-  // OpenCode tools ride every `zen-*` dispatch (pi-ai has no payload
-  // transform, so the tool list is the only request-shaping surface).
+  // OpenCode tools plus the `<env>` system-prompt marker ride every `zen-*`
+  // dispatch (pi-ai has no payload transform, so the context is the only
+  // request-shaping surface).
   const toNativeModel = (model: Model<Api>): Model<Api> => ({
     ...model,
     api: nativeApi,
@@ -374,7 +375,7 @@ export function createZenEngineFunctions(
   ) =>
     resolve().stream(
       toNativeModel(model),
-      applyOpenCodeFreeTools(context),
+      applyOpenCodeFreeContext(context),
       withZenHeaders(options, nativeApi),
     );
   const streamSimple: ApiStreamSimpleFunction = (
@@ -384,7 +385,7 @@ export function createZenEngineFunctions(
   ) =>
     resolve().streamSimple(
       toNativeModel(model),
-      applyOpenCodeFreeTools(context),
+      applyOpenCodeFreeContext(context),
       withZenHeaders(options, nativeApi),
     );
   return { stream, streamSimple };

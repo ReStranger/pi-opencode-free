@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Context } from "@earendil-works/pi-ai";
 import {
+  applyOpenCodeFreeContext,
+  applyOpenCodeFreeSystemPrompt,
   applyOpenCodeFreeTools,
   isKnownOpencodeToolName,
   opencodeTool,
   OPENCODE_CORE_TOOL_NAMES,
+  OPENCODE_ENV_BLOCK,
   OPENCODE_TOOL_DEFINITIONS,
 } from "#src/zen-tools.ts";
 
@@ -179,3 +183,66 @@ function opencodeStub(
     parameters: { type: "object", properties: {} } as never,
   };
 }
+
+test("system-prompt shaping appends the <env> marker the gate requires", () => {
+  const context: Context = {
+    systemPrompt: "You are terse.",
+    messages: [],
+  };
+  const shaped = applyOpenCodeFreeSystemPrompt(context);
+  assert.notEqual(shaped, context);
+  assert.ok(shaped.systemPrompt?.startsWith("You are terse."));
+  assert.ok(shaped.systemPrompt?.includes("<env>"));
+  assert.ok(shaped.systemPrompt?.includes("</env>"));
+  assert.ok(shaped.systemPrompt?.includes(OPENCODE_ENV_BLOCK));
+});
+
+test("system-prompt shaping adds the marker when no prompt is present", () => {
+  const shaped = applyOpenCodeFreeSystemPrompt({ messages: [] });
+  assert.equal(shaped.systemPrompt, OPENCODE_ENV_BLOCK);
+  assert.match(shaped.systemPrompt ?? "", /<env>[\s\S]*<\/env>/);
+});
+
+test("system-prompt shaping does not duplicate an existing <env> block", () => {
+  const context: Context = {
+    systemPrompt: "prompt\n\n<env>\n</env>",
+    messages: [],
+  };
+  assert.equal(applyOpenCodeFreeSystemPrompt(context), context);
+});
+
+test("system-prompt shaping marks the leading transcript system message", () => {
+  // Pi 1.0+ native engines take the wire system prompt from this transcript
+  // entry, not from `context.systemPrompt`; an empty content is the Pi 1.4
+  // shape where the real prompt is rendered by the host around it.
+  const context = {
+    messages: [
+      { role: "system", content: "" },
+      { role: "user", content: "hi", timestamp: 1 },
+    ],
+  } as unknown as Context;
+  const shaped = applyOpenCodeFreeSystemPrompt(context);
+  const first = shaped.messages[0] as unknown as {
+    role: string;
+    content: string;
+  };
+  assert.equal(first.role, "system");
+  assert.match(first.content, /<env>[\s\S]*<\/env>/);
+  assert.equal(shaped.messages[1], context.messages[1]);
+  assert.equal(shaped.systemPrompt, undefined); // transcript carries the marker
+});
+
+test("full context shaping adds tools and the marker without losing messages", () => {
+  const messages: Context["messages"] = [
+    { role: "user", content: "hi", timestamp: 1 },
+  ];
+  const shaped = applyOpenCodeFreeContext({
+    systemPrompt: "You are terse.",
+    messages,
+  });
+  assert.equal(shaped.messages, messages);
+  assert.match(shaped.systemPrompt ?? "", /<env>[\s\S]*<\/env>/);
+  assert.ok(Array.isArray(shaped.tools));
+  assert.ok(shaped.tools?.some((tool) => tool.name === "shell"));
+  assert.ok(shaped.tools?.some((tool) => tool.name === "read"));
+});

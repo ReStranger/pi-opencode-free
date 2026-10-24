@@ -116,34 +116,36 @@ export function isKnownApi(value: unknown): value is string {
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /** 48-bit word the session id's time part lives in. */
-const MASK48 = 0xffffffffffn;
-/** Client Identifier counters cycle 1..48; the gate accepts low counters. */
-const SESSION_COUNTER_MAX = 48n;
+const MASK48 = 0xffffffffffffn;
 
-let sessionCounter = 0n;
+let lastTimestamp = 0;
+let sessionCounter = 0;
 
 /**
  * Mirrors the official client's `Identifier.descending()` session layout:
- * the 12 lowercase hex characters are `~(ts_ms << 12 | counter)` truncated to
- * 48 bits. Upstream validates HOW the time part is encoded (an ascending
+ * the 12 lowercase hex characters are `~(ts_ms * 0x1000 + counter)` truncated
+ * to 48 bits. Upstream validates HOW the time part is encoded (an ascending
  * timestamp or a foreign encoding is rejected with 403 even when the `ses_`
  * shape is right), so the timestamp half must be minted this way.
  *
- * The 14 base62 remaining characters are random, as in the client.
+ * The counter resets whenever the millisecond changes and increments per id,
+ * exactly like the client. The 14 base62 remaining characters are random.
  */
-export function canonicalSessionId(): string {
-  sessionCounter = (sessionCounter % SESSION_COUNTER_MAX) + 1n;
-  const current =
-    ((BigInt(Date.now()) << 12n) | sessionCounter) & MASK48;
-  const inverted = ~current & MASK48;
-  const timePart = inverted.toString(16).padStart(12, "0").toLowerCase();
-  let value = 0n;
-  for (const byte of randomBytes(11)) value = (value << 8n) | BigInt(byte);
-  let suffix = "";
-  for (let i = 0; i < 14; i++) {
-    suffix = BASE62[Number(value % 62n)] + suffix;
-    value /= 62n;
+export function canonicalSessionId(timestamp = Date.now()): string {
+  if (timestamp !== lastTimestamp) {
+    lastTimestamp = timestamp;
+    sessionCounter = 0;
   }
+  sessionCounter++;
+  const current = BigInt(timestamp) * 0x1000n + BigInt(sessionCounter);
+  const timePart = (~current & MASK48)
+    .toString(16)
+    .padStart(12, "0")
+    .toLowerCase();
+  const suffix = Array.from(
+    randomBytes(14),
+    (byte) => BASE62[byte % 62],
+  ).join("");
   return `ses_${timePart}${suffix}`;
 }
 

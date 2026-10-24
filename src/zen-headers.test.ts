@@ -5,6 +5,7 @@ import {
   ANTHROPIC_BETA,
   ANTHROPIC_VERSION,
   applyOpenCodeFreeHeaders,
+  canonicalSessionId,
   getHeader,
   OPENCODE_USER_AGENT,
   zenRootSession,
@@ -97,3 +98,17 @@ test("foreign traffic without the identity headers stays untouched", () => {
     "User-Agent": "some-other-client/1.0",
   });
 });
+
+test("session time part encodes the official 48-bit descending timestamp", () => {
+  const timestamp = 1_792_860_221_229;
+  const id = canonicalSessionId(timestamp);
+  const timePart = id.slice(4, 16);
+  assert.match(timePart, /^[0-9a-f]{12}$/);
+  // The official Identifier stores ~(ts_ms * 0x1000 + counter) in the low
+  // 48 bits; decoding must recover ts_ms modulo 2^36. A 40-bit mask (the
+  // pre-fix bug) would recover a much smaller, wrong value here.
+  const encoded =
+    (~BigInt(`0x${timePart}`) & 0xffffffffffffn) >> 12n;
+  assert.equal(encoded, BigInt(timestamp) % (1n << 36n));
+});
+
