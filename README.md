@@ -21,21 +21,25 @@ The Pi CLI already ships an `opencode` provider, but through it the models only 
 > mirrors the official OpenCode client exactly — the `opencode/<channel>/<version>/<cli>`
 > User-Agent (currently `2.1.1`), descending-encoded session ids (`x-opencode-session` +
 > `x-opencode-session-id`), no `x-opencode-request`, the anonymous `public`
-> credential, and the genuine core OpenCode tool definitions (Linux `shell`
-> wording) on every
+> credential, the genuine core OpenCode tool definitions (Linux `shell`
+> wording), and the literal `<env>...</env>` system-prompt block on every
 > request. Upstream changed this contract before (2026-09-16, 2026-10-11,
 > 2026-10-14, 2026-10-19, 2026-10-20, 2026-10-23, spec-tracking `jasonxu114514/opencode2api`); when it changes
 > again this pin needs updating.
 
-> **`429 FreeUsageLimitError` is not a fingerprint mismatch.** "Free usage
-> limit reached" means Zen detected a non-official client on this egress IP
-> and zeroed that IP's daily free quota — the official client gets the same
-> answer there until the window resets (upstream issues #145/#148). No header
-> or body change undoes it: wait for the reset or change the egress IP. A
-> `403 FreeTierError`, by contrast, is the client fingerprint this extension
-> repairs; a `401` means the anonymous credential was lost from the request.
+> **`429 FreeUsageLimitError` has two causes.** The free tier requires a
+> literal `<env>...</env>` block in the system prompt; Pi 1.4 renders its
+> prompt without one, and Zen then reports the same "free usage limit"
+> error even when the IP quota is untouched. The extension appends a small
+> real environment block to the transcript system prompt
+> (`src/zen-tools.ts`), so a fresh request should pass. If a 429 persists
+> with the marker present, it is the genuine per-IP daily quota — the
+> official client gets the same answer until the window resets (upstream
+> issues #145/#148); wait for the reset or change the egress IP. A
+> `403 FreeTierError` is the client fingerprint this extension repairs; a
+> `401` means the anonymous credential was lost from the request.
 
-Everything else is Pi's native engines with per-model dispatch, exactly like the stock `opencode` provider: streaming, reasoning, tools. There are two interception points, and they share one transform (`src/zen-headers.ts`): a `before_provider_headers` hook, and one stamping engine adapter per Zen backend — `zen-openai-completions`, `zen-openai-responses`, `zen-anthropic-messages`, `zen-google-generative-ai` (`src/zen-engines.ts`). Models point at those adapters, so the stamp travels with the provider config even where no ambient hook runs: foreground (`async:false`) subagent children. Each request gets the OpenCode identity headers stamped on it and the anonymous `public` credential riding the auth header each backend expects, so neither the `"none"` placeholder nor any stored credential ever leaks on the wire. Upstream `opencode2api` fixes that translate to no-ops here: Bun TLS/uTLS
+Everything else is Pi's native engines with per-model dispatch, exactly like the stock `opencode` provider: streaming, reasoning, tools. There are two interception points, and they share one transform (`src/zen-headers.ts`): a `before_provider_headers` hook, and one stamping engine adapter per Zen backend — `zen-openai-completions`, `zen-openai-responses`, `zen-anthropic-messages`, `zen-google-generative-ai` (`src/zen-engines.ts`). The adapters also apply the free-tier context shape — genuine tools plus the `<env>` marker (`src/zen-tools.ts`). Models point at those adapters, so the stamp travels with the provider config even where no ambient hook runs: foreground (`async:false`) subagent children. Each request gets the OpenCode identity headers stamped on it and the anonymous `public` credential riding the auth header each backend expects, so neither the `"none"` placeholder nor any stored credential ever leaks on the wire. Upstream `opencode2api` fixes that translate to no-ops here: Bun TLS/uTLS
 fingerprinting (Pi's fetch stack is stock, nothing to spoof), process-exit caps and
 cooldown accounting (Pi never mass-spawns worker processes), and placeholder-key /
 IP-abuse terminal detection (`pi-ai` provider-retry already refuses to retry 401/403
