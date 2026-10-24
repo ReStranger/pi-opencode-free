@@ -3,20 +3,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   composeZenAnthropicFetch,
+  composeZenChatFetch,
   composeZenTransformHeaders,
   createZenEngineFunctions,
   isNativeZenApi,
   isZenApi,
   nativeApiForZen,
   registerZenApiProviders,
+  shapeZenV2ChatBody,
   zenApiForNative,
   withAnthropicBeta,
   ZEN_ANTHROPIC_API,
   ZEN_COMPLETIONS_API,
   ZEN_GOOGLE_API,
   ZEN_RESPONSES_API,
+  ZEN_V2_CHAT_MAX_COMPLETION_TOKENS,
 } from "#src/zen-engines.ts";
-import { ZEN_ANTHROPIC_BASE_URL } from "#src/zen-headers.ts";
+import { ZEN_ANTHROPIC_BASE_URL, ZEN_BASE_URL } from "#src/zen-headers.ts";
 
 test("native/zen api mapping round-trips on all four backends", async () => {
   assert.equal(zenApiForNative("openai-completions"), ZEN_COMPLETIONS_API);
@@ -195,13 +198,13 @@ test("composeZenTransformHeaders without a parent still stamps", async () => {
 
 test("withAnthropicBeta appends beta=true and preserves the existing query", () => {
   assert.equal(
-    withAnthropicBeta("https://opencode.ai/inference/v1/messages?api=1"),
-    "https://opencode.ai/inference/v1/messages?api=1&beta=true",
+    withAnthropicBeta(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1`),
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1&beta=true`,
   );
   // Already flagged: returned unchanged (no double decoration).
   assert.equal(
-    withAnthropicBeta("https://opencode.ai/inference/v1/messages?beta=true"),
-    "https://opencode.ai/inference/v1/messages?beta=true",
+    withAnthropicBeta(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`),
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`,
   );
   // Not parseable as a URL: returned as received.
   assert.equal(withAnthropicBeta("not a url"), "not a url");
@@ -232,15 +235,15 @@ test("anthropic lane rides beta=true only on the Zen base", async () => {
   assert.ok(composed, "delegated options carry the composed fetch");
   assert.notEqual(composed, parentFetch as unknown);
   // Zen base: beta=true appended, existing query preserved.
-  await composed("https://opencode.ai/inference/v1/messages?api=1");
+  await composed(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1`);
   // Foreign host passes through byte-identical.
   await composed(new URL("https://example.com/v1/messages?x=1"));
   // Zen base already carrying beta=true is not decorated twice.
-  await composed("https://opencode.ai/inference/v1/messages?beta=true");
+  await composed(`${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`);
   assert.deepEqual(seen, [
-    "https://opencode.ai/inference/v1/messages?api=1&beta=true",
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?api=1&beta=true`,
     "https://example.com/v1/messages?x=1",
-    "https://opencode.ai/inference/v1/messages?beta=true",
+    `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`,
   ]);
 });
 
@@ -262,4 +265,127 @@ test("composeZenAnthropicFetch rewrites only the Zen base and passes the rest th
     "https://example.com/v1/messages?x=1",
     `${ZEN_ANTHROPIC_BASE_URL}/v1/messages?beta=true`,
   ]);
+});
+
+test("shapeZenV2ChatBody adds the 2.1 ceiling and keeps the client key order", () => {
+  const body = shapeZenV2ChatBody({
+    temperature: 0.2,
+    stream: true,
+    model: "hy3-free",
+    messages: [{ role: "user", content: "hi" }],
+  });
+  const parsed = JSON.parse(body);
+  assert.equal(parsed.max_completion_tokens, ZEN_V2_CHAT_MAX_COMPLETION_TOKENS);
+  assert.equal(parsed.max_tokens, undefined);
+  // The client's own order first (model, messages, stream, ...) then the
+  // remaining keys sorted; other keys survive unchanged.
+  assert.deepEqual(Object.keys(parsed), [
+    "model",
+    "messages",
+    "stream",
+    "max_completion_tokens",
+    "temperature",
+  ]);
+  assert.equal(parsed.temperature, 0.2);
+});
+
+test("shapeZenV2ChatBody honours an explicit caller ceiling", () => {
+  const explicitCompletion = shapeZenV2ChatBody({
+    model: "x",
+    messages: [],
+    max_completion_tokens: 1234,
+  });
+  assert.equal(JSON.parse(explicitCompletion).max_completion_tokens, 1234);
+  // Legacy max_tokens (what Pi emits before compat kicks in) also suppresses
+  // the default ceiling rather than duplicating it.
+  const legacy = shapeZenV2ChatBody({
+    model: "x",
+    messages: [],
+    max_tokens: 5678,
+  });
+  const parsed = JSON.parse(legacy);
+  assert.equal(parsed.max_tokens, 5678);
+  assert.equal(parsed.max_completion_tokens, undefined);
+});
+
+test("shapeZenV2ChatBody pins strict:false on function tools", () => {
+  const parsed = JSON.parse(
+    shapeZenV2ChatBody({
+      model: "x",
+      messages: [],
+      tools: [
+        {
+          type: "function",
+          function: { name: "shell", description: "run", parameters: {} },
+        },
+        {
+          type: "function",
+          function: { name: "read", strict: true, parameters: {} },
+        },
+        { type: "custom", name: "other" },
+        null,
+      ],
+    }),
+  );
+  assert.equal(parsed.tools[0].function.strict, false);
+  assert.equal(parsed.tools[1].function.strict, true); // explicit value wins
+  assert.deepEqual(parsed.tools[2], { type: "custom", name: "other" });
+  assert.equal(parsed.tools[3], null);
+});
+
+test("shapeZenV2ChatBody does not HTML-escape tool text", () => {
+  const body = shapeZenV2ChatBody({
+    model: "x",
+    messages: [{ role: "user", content: "a < b & c > d" }],
+  });
+  assert.ok(body.includes("a < b & c > d"));
+  assert.ok(!body.includes("\\u003c"));
+  assert.ok(!body.includes("\\u0026"));
+});
+
+test("composeZenChatFetch rewrites only Zen chat bodies", async () => {
+  const calls: { input: any; init: any }[] = [];
+  const parentFetch = ((input: any, init?: any) => {
+    calls.push({ input, init });
+    return {} as any;
+  }) as unknown as typeof fetch;
+  const composed = composeZenChatFetch(parentFetch);
+  const chatUrl = `${ZEN_BASE_URL}/chat/completions`;
+  // Zen chat body: reshaped and re-serialized.
+  await composed(chatUrl, {
+    method: "POST",
+    body: JSON.stringify({ model: "x", messages: [], temperature: 0.1 }),
+    headers: { "content-type": "application/json" },
+  });
+  // Foreign host: byte-identical passthrough.
+  await composed("https://example.com/v1/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({ model: "x", messages: [] }),
+  });
+  // Non-chat Zen path (/responses) stays untouched.
+  await composed(`${ZEN_BASE_URL}/responses`, {
+    method: "POST",
+    body: JSON.stringify({ model: "x", input: [] }),
+  });
+  // Non-string body (streams): untouched.
+  await composed(chatUrl, { method: "POST", body: new Uint8Array([1]) });
+  // Invalid JSON: untouched.
+  await composed(chatUrl, { method: "POST", body: "{not json" });
+  assert.equal(calls[0]!.input, chatUrl);
+  const shaped = JSON.parse(calls[0]!.init.body);
+  assert.equal(shaped.max_completion_tokens, ZEN_V2_CHAT_MAX_COMPLETION_TOKENS);
+  assert.equal(calls[0]!.init.method, "POST");
+  assert.deepEqual(calls[0]!.init.headers, {
+    "content-type": "application/json",
+  });
+  assert.equal(
+    calls[1]!.init.body,
+    JSON.stringify({ model: "x", messages: [] }),
+  );
+  assert.equal(
+    calls[2]!.init.body,
+    JSON.stringify({ model: "x", input: [] }),
+  );
+  assert.ok(calls[3]!.init.body instanceof Uint8Array);
+  assert.equal(calls[4]!.init.body, "{not json");
 });

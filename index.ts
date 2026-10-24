@@ -5,13 +5,12 @@ import {
   OPENCODE_USER_AGENT,
   ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
+  ZEN_GOOGLE_BASE_URL,
   applyOpenCodeFreeHeaders,
   zenRootSession,
   isKnownApi,
-  isTrustedBaseUrl,
 } from "#src/zen-headers.ts";
 import {
-  ZEN_ANTHROPIC_API,
   ZEN_COMPLETIONS_API,
   nativeApiForZen,
   registerZenApiProviders,
@@ -40,7 +39,8 @@ export const COMPLETIONS_COMPAT = {
   // Zen often ends streams without finish_reason; let pi infer stop/toolUse
   // instead of throwing "Stream ended without finish_reason".
   supportsFinishReason: false,
-  maxTokensField: "max_tokens" as const,
+  // The 2.1 client always sends the ceiling as max_completion_tokens.
+  maxTokensField: "max_completion_tokens" as const,
   requiresReasoningContentOnAssistantMessages: true,
 };
 export const RESPONSES_COMPAT = {
@@ -61,20 +61,25 @@ export function compatForNative(native: string) {
  * dispatch as the stock `opencode` provider's native engines, plus the Zen
  * identity stamp on every request (see `./zen-engines.js`). */
 
-// Anthropic SDK appends `/v1/messages`; OpenAI-compatible SDKs append
-// their paths onto the `/v1` root. Both land on the keyless inference host
-// (see zen-headers.ts).
+/** Current per-engine Zen base. Absent means the provider-level OpenAI base
+ * (`ZEN_BASE_URL`) applies. */
+export function baseUrlForNative(native: string | undefined): string | undefined {
+  if (native === "anthropic-messages") return ZEN_ANTHROPIC_BASE_URL;
+  if (native === "google-generative-ai") return ZEN_GOOGLE_BASE_URL;
+  return undefined;
+}
+
 function toProviderModel(m: OpenCodeModelInfo) {
     const native = m.api ?? "openai-completions";
     const api = zenApiForNative(native) ?? ZEN_COMPLETIONS_API;
+    const baseUrl = baseUrlForNative(native);
   return {
     id: m.id.replace(/^opencode\//, ""),
     name: m.name,
     api,
-    // Anthropic backend lives at the bare gateway root, like stock.
-    ...(native === "anthropic-messages"
-      ? { baseUrl: ZEN_ANTHROPIC_BASE_URL }
-      : {}),
+    // Anthropic and Google engines override the provider base; the OpenAI
+    // family uses the provider-level one.
+    ...(baseUrl ? { baseUrl } : {}),
     reasoning: m.reasoning ?? false,
     thinkingLevelMap: m.thinkingLevelMap,
     input: (m.input?.includes("image") ? ["text", "image"] : ["text"]) as (
@@ -121,7 +126,7 @@ function fromStoredModel(m: unknown): ProviderModelConfig | null {
   if (typeof m !== "object" || m === null) return null;
   const {
     provider: _provider,
-    baseUrl: storedBaseUrl,
+    baseUrl: _storedBaseUrl,
     ...rest
   } = m as {
     provider?: unknown;
@@ -148,24 +153,21 @@ function fromStoredModel(m: unknown): ProviderModelConfig | null {
     // (the Zen default completions path).
     delete (config as { api?: unknown }).api;
   }
-  // Keep only a trusted non-default per-model baseUrl (Anthropic override);
-  // the default comes from the provider-level `baseUrl` below. Anything else
-  // (including legacy snapshots that forced every model onto the default) is
-  // dropped, then re-derived from the migrated engine below.
-  if (isTrustedBaseUrl(storedBaseUrl) && storedBaseUrl !== ZEN_BASE_URL) {
-    (config as { baseUrl?: string }).baseUrl = storedBaseUrl;
-  }
-  if (
-    (config as { api?: string }).api === ZEN_ANTHROPIC_API &&
-    typeof (config as { baseUrl?: string }).baseUrl !== "string"
-  ) {
-    (config as { baseUrl?: string }).baseUrl = ZEN_ANTHROPIC_BASE_URL;
+  // Base URLs are derived from the migrated engine, never trusted from the
+  // snapshot: this also migrates pre-2.1 snapshots (which stored the flat
+  // `/inference/v1` or `/inference` bases) onto the current family-scoped
+  // routes. An unknown engine keeps the provider-level OpenAI base.
+  const baseUrl = baseUrlForNative(native);
+  if (baseUrl) {
+    (config as { baseUrl?: string }).baseUrl = baseUrl;
+  } else {
+    delete (config as { baseUrl?: unknown }).baseUrl;
   }
   // SAFETY: stored snapshot entries are provider model configs previously
   // produced by toStoredModel (trusted fields only: the persistence-only
-  // provider/default-baseUrl properties and the legacy opencodeApi routing
-  // field were stripped or migrated above; api is migrated to a `zen-*`
-  // engine id, baseUrl is allowlisted).
+  // provider property and the legacy opencodeApi routing field were stripped
+  // or migrated above; api is migrated to a `zen-*` engine id, baseUrl is
+  // re-derived from it).
   return config as unknown as ProviderModelConfig;
 }
 

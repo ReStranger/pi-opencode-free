@@ -16,7 +16,6 @@ import type {
 import { discoverModels } from "#src/discovery.ts";
 import {
   OPENCODE_USER_AGENT,
-  ZEN_ANTHROPIC_BASE_URL,
   ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
   canonicalSessionId,
@@ -28,8 +27,9 @@ import {
   zenApiForNative,
   ZEN_COMPLETIONS_API,
 } from "#src/zen-engines.ts";
-// Imported, never mirrored: compat flags must match production exactly.
-import { compatForNative } from "#index";
+// Imported, never mirrored: compat flags and base routing must match
+// production exactly.
+import { baseUrlForNative, compatForNative } from "#index";
 
 registerZenApiProviders();
 
@@ -76,8 +76,7 @@ function toPiModel(m: Awaited<ReturnType<typeof discoverModels>>[number]): any {
     name: m.name,
     api,
     provider: "opencode-free",
-    baseUrl:
-      native === "anthropic-messages" ? ZEN_ANTHROPIC_BASE_URL : ZEN_BASE_URL,
+    baseUrl: baseUrlForNative(native) ?? ZEN_BASE_URL,
     reasoning: m.reasoning ?? false,
     thinkingLevelMap: m.thinkingLevelMap,
     input: ["text"],
@@ -121,7 +120,12 @@ function errorText(final: any): string {
 const SKIP_PATTERNS = [
   /does not support this protocol/i, // upstream model/protocol routing, not our lane
   /Rate limit exceeded/i, // FreeUsageLimitError: gate passed, quota tripped
+  /Free usage limit reached/i, // 429: the IP's daily free quota is zeroed
+  /RegionError/i, // model not offered in this country — environmental, not our lane
 ];
+
+/** Free-tier quota signal among the skip reasons (any of its wire spellings). */
+const RATE_LIMIT_PATTERN = /Rate limit exceeded|Free usage limit reached/i;
 
 /** Runs the runner over candidates until one succeeds; frees gate-side skips. */
 async function runModelProbe(
@@ -129,7 +133,8 @@ async function runModelProbe(
   candidates: typeof models,
   runFn: (m: (typeof models)[number]) => Promise<boolean>,
 ) {
-  let sawRateLimitOnly = candidates.length > 0;
+  let sawRateLimit = false;
+  let sawOtherSkip = false;
   for (const candidate of candidates) {
     console.log(`   -- trying ${candidate.id} --`);
     try {
@@ -143,17 +148,20 @@ async function runModelProbe(
         return;
       }
       if (SKIP_PATTERNS.some((p) => p.test(text))) {
-        sawRateLimitOnly = sawRateLimitOnly && /Rate limit exceeded/i.test(text);
+        if (RATE_LIMIT_PATTERN.test(text)) sawRateLimit = true;
+        else sawOtherSkip = true;
         console.log(`   -- skip ${candidate.id}: upstream skip (${text.slice(0, 80)}) --`);
         continue;
       }
       throw error;
     }
   }
-  if (sawRateLimitOnly) {
+  if (sawRateLimit) {
     console.log(`SKIP  ${label} — free-tier quota exhausted on every candidate (gate itself passed; retry later)`);
+  } else if (sawOtherSkip) {
+    console.log(`SKIP  ${label} — all candidates restricted upstream (protocol/region), not our lane`);
   } else {
-    check(label, false, "all candidates skipped (protocol routing)");
+    check(label, false, "no candidates available");
   }
 }
 
@@ -183,7 +191,10 @@ await runModelProbe("plain chat", chatCandidates, async (m) => {
     throw new Error(errorText(final));
   }
   const ok = final?.stopReason === "stop" && /OK/i.test(textOf(final));
-  console.log(`      model=${m.id} stopReason=${final?.stopReason} text="${textOf(final).trim().slice(0, 60)}"`);
+  console.log(
+    `      model=${m.id} stopReason=${final?.stopReason} text="${textOf(final).trim().slice(0, 60)}"` +
+      (final?.stopReason === "error" ? ` error=${errorText(final).slice(0, 160)}` : ""),
+  );
   return ok && (final?.usage?.output ?? 0) > 0;
 });
 

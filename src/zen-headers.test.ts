@@ -48,7 +48,9 @@ test("wire shape matches the v2 client on the default (OpenAI) lane", () => {
     Authorization: "Bearer none",
   };
   applyOpenCodeFreeHeaders(headers);
-  assert.equal(headers.Accept, "application/json, text/event-stream");
+  // The 2.1 client sets no Accept itself, so fetch fills `*/*`; the SDK
+  // default `application/json` must never reach the wire (#143).
+  assert.equal(headers.Accept, "*/*");
   assert.equal(headers["x-opencode-client"], "cli");
   assert.equal(headers["User-Agent"], OPENCODE_USER_AGENT);
   assert.equal(headers["x-opencode-request"], undefined);
@@ -70,7 +72,7 @@ test("anthropic lane pins the fixed beta set and API version", () => {
   assert.equal(headers["anthropic-version"], ANTHROPIC_VERSION);
   // Bearer on the anthropic lane is an instant 403 — never present.
   assert.equal(getHeader(headers, "authorization"), undefined);
-  assert.equal(headers.Accept, "application/json, text/event-stream");
+  assert.equal(headers.Accept, "*/*");
 });
 
 test("explicit lane argument overrides presence sniffing", () => {

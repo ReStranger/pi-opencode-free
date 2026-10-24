@@ -16,6 +16,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import {
   ZEN_ANTHROPIC_BASE_URL,
+  ZEN_BASE_URL,
   applyOpenCodeFreeHeaders,
   type MutableHeaders,
   type ZenAuthLane,
@@ -155,6 +156,112 @@ export function composeZenAnthropicFetch(
   };
 }
 
+/**
+ * The `max_completion_tokens` a 2.1 client puts on every chat body (upstream
+ * #142). An explicit caller limit still wins, so a Pi-configured ceiling is
+ * honoured.
+ */
+export const ZEN_V2_CHAT_MAX_COMPLETION_TOKENS = 32_000;
+
+/**
+ * The order the 2.1 client's `JSON.stringify` emits chat-body keys in
+ * (upstream `v2ChatKeyOrder`). Object key order is part of the body
+ * fingerprint the gate compares, and Pi's OpenAI SDK uses its own order.
+ */
+export const ZEN_V2_CHAT_KEY_ORDER = [
+  "model",
+  "messages",
+  "tools",
+  "stream",
+  "stream_options",
+  "max_completion_tokens",
+] as const;
+
+/**
+ * Shapes a chat payload the way the 2.1 free-tier client sends it: the
+ * client's own `max_completion_tokens` when no ceiling was requested,
+ * `strict: false` on function tools that omit it, and the client's key
+ * order. Returns a JSON string (plain `JSON.stringify`, so `<`, `>` and `&`
+ * are not HTML-escaped).
+ */
+export function shapeZenV2ChatBody(
+  payload: Record<string, unknown>,
+): string {
+  const shaped: Record<string, unknown> = { ...payload };
+  if (
+    !Object.prototype.hasOwnProperty.call(shaped, "max_completion_tokens") &&
+    !Object.prototype.hasOwnProperty.call(shaped, "max_tokens")
+  ) {
+    shaped.max_completion_tokens = ZEN_V2_CHAT_MAX_COMPLETION_TOKENS;
+  }
+  if (Array.isArray(shaped.tools)) {
+    shaped.tools = shaped.tools.map((tool) => {
+      if (typeof tool !== "object" || tool === null) return tool;
+      const entry = tool as { type?: unknown; function?: unknown };
+      if (entry.type !== "function") return tool;
+      if (
+        typeof entry.function !== "object" ||
+        entry.function === null ||
+        Array.isArray(entry.function)
+      ) {
+        return tool;
+      }
+      const fn = entry.function as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(fn, "strict")) return tool;
+      return { ...entry, function: { ...fn, strict: false } };
+    });
+  }
+  const ordered: Record<string, unknown> = {};
+  for (const key of ZEN_V2_CHAT_KEY_ORDER) {
+    if (Object.prototype.hasOwnProperty.call(shaped, key)) {
+      ordered[key] = shaped[key];
+    }
+  }
+  for (const key of Object.keys(shaped).sort()) {
+    if (!Object.prototype.hasOwnProperty.call(ordered, key)) {
+      ordered[key] = shaped[key];
+    }
+  }
+  return JSON.stringify(ordered);
+}
+
+/**
+ * Composes the completions-lane fetch: rewrites a Zen chat body into the 2.1
+ * client's byte layout before handing it to the OpenAI SDK's fetch. Any
+ * non-Zen URL, non-string body or non-chat payload passes through untouched.
+ */
+export function composeZenChatFetch(parent?: ZenFetch | undefined): ZenFetch {
+  const fetchFn = parent ?? globalThis.fetch.bind(globalThis);
+  return (input, init) => {
+    if (!init || typeof init.body !== "string") return fetchFn(input, init);
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : String(input);
+    if (!url.startsWith(ZEN_BASE_URL)) return fetchFn(input, init);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(init.body);
+    } catch {
+      return fetchFn(input, init);
+    }
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload) ||
+      !Array.isArray((payload as Record<string, unknown>).messages)
+    ) {
+      return fetchFn(input, init);
+    }
+    return fetchFn(input, {
+      ...init,
+      body: shapeZenV2ChatBody(payload as Record<string, unknown>),
+    });
+  };
+}
+
 export type HeaderTransform = (
   headers: ProviderHeaders,
 ) => ProviderHeaders | Promise<ProviderHeaders>;
@@ -201,9 +308,15 @@ function withZenHeaders<O>(
   };
   // The anthropic backend rides `?beta=true` on the Zen base, the way the
   // 2.x client marks its messages endpoint (other lanes and any non-Zen
-  // base URL are left untouched).
+  // base URL are left untouched). The completions lane rewrites chat bodies
+  // into the 2.1 client's byte layout (max_completion_tokens, tool strict,
+  // key order; upstream #142).
   if (nativeApi === "anthropic-messages") {
     composed.fetch = composeZenAnthropicFetch(
+      (composed as { fetch?: ZenFetch }).fetch,
+    );
+  } else if (nativeApi === "openai-completions") {
+    composed.fetch = composeZenChatFetch(
       (composed as { fetch?: ZenFetch }).fetch,
     );
   }

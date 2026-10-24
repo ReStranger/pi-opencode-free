@@ -9,8 +9,8 @@ import opencodeDirectExtension, {
 
 // Zen request invariants, asserted against the extension's REAL code
 // (compat constants + toProviderModel output), not local mirrors.
-// Context: pi-cache-optimizer compatibility — Zen payloads must keep
-// max_tokens (never renamed to max_completion_tokens), keep
+// Context: pi-cache-optimizer compatibility — Zen payloads must use the
+// 2.1 client's max_completion_tokens field (upstream #142), keep
 // reasoning_content on assistant messages, and keep tool_calls intact.
 // Those payload shapes are produced by Pi's native engines from our
 // per-model api + compat fields, so pinning compat here pins the payload.
@@ -39,9 +39,9 @@ async function getHook() {
   return hook;
 }
 
-test("compat constants keep max_tokens and never rename it", async () => {
-  assert.equal(COMPLETIONS_COMPAT.maxTokensField, "max_tokens");
-  assert.equal("max_completion_tokens" in COMPLETIONS_COMPAT, false);
+test("compat constants send the 2.1 client's max_completion_tokens ceiling", async () => {
+  assert.equal(COMPLETIONS_COMPAT.maxTokensField, "max_completion_tokens");
+  assert.equal("max_tokens" in COMPLETIONS_COMPAT, false);
   assert.equal(RESPONSES_COMPAT.sessionAffinityFormat, "openai-nosession");
 });
 
@@ -118,15 +118,16 @@ test("models carry zen per-model api with stock-style compat and baseUrl routing
     assert.equal(gemini?.api, "zen-google-generative-ai");
     // Compat: completions-only flags stay on the completions engine.
     assert.deepEqual(hy3?.compat, COMPLETIONS_COMPAT);
-    assert.equal(hy3?.compat.maxTokensField, "max_tokens");
+    assert.equal(hy3?.compat.maxTokensField, "max_completion_tokens");
     assert.deepEqual(muse?.compat, RESPONSES_COMPAT);
     assert.equal(minimax?.compat, undefined); // stock defines none
     assert.equal(gemini?.compat, undefined); // stock defines none
-    // Base URLs: default /v1 inherited, Anthropic bare root override.
+    // Base URLs: OpenAI default /v1 inherited, Anthropic/Google
+    // family-scoped routes pinned (#141).
     assert.equal(hy3?.baseUrl, undefined);
     assert.equal(muse?.baseUrl, undefined);
-    assert.equal(minimax?.baseUrl, "https://opencode.ai/inference");
-    assert.equal(gemini?.baseUrl, undefined);
+    assert.equal(minimax?.baseUrl, "https://opencode.ai/inference/anthropic");
+    assert.equal(gemini?.baseUrl, "https://opencode.ai/inference/v1");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -18,8 +18,9 @@
  *    from the legacy Zen console (`/zen/v1/models`), so discovery keeps its
  *    own URL. Anthropic messages requests additionally ride `?beta=true`
  *    (set by the `zen-*` engine adapter, see `./zen-engines.js`).
- * 2. Header shape — `Accept: application/json, text/event-stream`,
- *    `opencode/<channel>/<version>/<name>` User-Agent, a non-canonical
+ * 2. Header shape — the runtime fetch default for `Accept` (all media
+ *    types; the 2.1 client sets none explicitly), `opencode/latest/2.1.1/cli`
+ *    User-Agent, a non-canonical
  *    `x-opencode-project` (the client's own `global` passes), the session
  *    identity under `x-opencode-session` + `x-opencode-session-id` (one
  *    stable per-process id — the genuine client reuses its session for the
@@ -39,20 +40,50 @@
  */
 import { randomBytes } from "node:crypto";
 
-/** Keyless inference base (OpenAI-compatible engines; SDK appends the path). */
-export const ZEN_BASE_URL = "https://opencode.ai/inference/v1";
-/** Anthropic-messages base (bare root; Anthropic SDK appends `/v1/messages`). */
-export const ZEN_ANTHROPIC_BASE_URL = "https://opencode.ai/inference";
+/**
+ * Keyless inference base for the OpenAI-compatible engines (the SDK appends
+ * `/chat/completions` or `/responses`). The OpenCode 2.1 client groups the
+ * `/inference` routes by provider family, so chat and responses requests go
+ * through the `openai` segment (upstream `v2EndpointPath`, #141).
+ */
+export const ZEN_BASE_URL = "https://opencode.ai/inference/openai/v1";
+/**
+ * Anthropic-messages base (the Anthropic SDK appends `/v1/messages`). The
+ * 2.1 family grouping puts messages under `anthropic` (#141).
+ */
+export const ZEN_ANTHROPIC_BASE_URL =
+  "https://opencode.ai/inference/anthropic";
+/**
+ * Gemini base. The free catalog currently routes no model through the Google
+ * engine, and the upstream gateway captures no family grouping for it, so
+ * this stays on the flat legacy inference path.
+ */
+export const ZEN_GOOGLE_BASE_URL = "https://opencode.ai/inference/v1";
+
+/**
+ * Base URLs earlier releases of this extension persisted. Restoring them is
+ * allowed only so a snapshot written before the 2.1 route grouping migrates
+ * to the current bases instead of being dropped.
+ */
+const LEGACY_ZEN_BASE_URLS = new Set([
+  "https://opencode.ai/inference/v1", // pre-2.1 OpenAI + Google base
+  "https://opencode.ai/inference", // pre-2.1 Anthropic base
+]);
 
 /** Only base URLs we ever persist or restore; anything else is dropped. */
-const TRUSTED_BASE_URLS = new Set([ZEN_BASE_URL, ZEN_ANTHROPIC_BASE_URL]);
+const TRUSTED_BASE_URLS = new Set([
+  ZEN_BASE_URL,
+  ZEN_ANTHROPIC_BASE_URL,
+  ZEN_GOOGLE_BASE_URL,
+  ...LEGACY_ZEN_BASE_URLS,
+]);
 
 /**
  * The free-tier gate fingerprints the OpenCode client. Upstream accepts a
  * range of releases (the version number itself is not validated), kept
- * current with the latest public `@opencode/cli`.
+ * current with the latest public `@opencode/cli` (2.1.1 captured 2026-10-23).
  */
-export const OPENCODE_USER_AGENT = "opencode/latest/2.0.32/cli";
+export const OPENCODE_USER_AGENT = "opencode/latest/2.1.1/cli";
 
 /**
  * The fixed beta set the v2 free-tier client sends on Anthropic messages
@@ -189,7 +220,11 @@ export function applyOpenCodeFreeHeaders(
   // Identity first: compaction/summarization and normal turns share this path.
   // Pi's attribution may have set `x-opencode-client: pi`; restore `cli`.
   headers["x-opencode-client"] = "cli";
-  headers["Accept"] = "application/json, text/event-stream";
+  // The 2.1 client does not set Accept itself: fetch fills `*/*`. The SDKs
+  // (OpenAI/Anthropic) default to `application/json`, so pin the value fetch
+  // would add rather than leaving the SDK's default on the wire (#143).
+  deleteHeader(headers, "accept");
+  headers["Accept"] = "*/*";
   // One stable session identity for the whole process (see zenRootSession).
   // Upstream renders the v2 client as: root (parent when present, else own)
   // under `x-opencode-session`, `x-session-affinity` and `X-Session-Id`, and

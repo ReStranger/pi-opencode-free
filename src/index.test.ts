@@ -35,12 +35,12 @@ test("registers provider once with empty initial models and no boot fetch", asyn
     assert.equal(fetchCount, 0); // no fetch during extension load
     assert.deepEqual(registeredConfig.models, []); // populated by refreshModels
     assert.equal(registeredConfig.api, "zen-openai-completions"); // per-model default engine (not a dispatch change — every model carries its own zen-* api)
-    assert.equal(registeredConfig.baseUrl, "https://opencode.ai/inference/v1");
+    assert.equal(registeredConfig.baseUrl, "https://opencode.ai/inference/openai/v1");
     assert.equal(registeredConfig.name, "OpenCode Direct (Free)");
     assert.equal(registeredConfig.apiKey, "none"); // keyless placeholder (Pi core requires an auth method; the hook/wrapper replace it on every request)
     assert.equal(registeredConfig.headers["x-opencode-client"], "cli");
     assert.equal(registeredConfig.headers["x-opencode-project"], "global");
-    assert.equal(registeredConfig.headers["User-Agent"], "opencode/latest/2.0.32/cli");
+    assert.equal(registeredConfig.headers["User-Agent"], "opencode/latest/2.1.1/cli");
     assert.match(
       registeredConfig.headers["x-opencode-session"],
       /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, // canonical fallback for paths without per-request stamping (foreground children on non-completions engines)
@@ -65,7 +65,7 @@ test("registers provider once with empty initial models and no boot fetch", asyn
     );
     assert.equal(headers["x-opencode-session-id"], headers["x-opencode-session"]);
     assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
-    assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
+    assert.equal(headers["User-Agent"], "opencode/latest/2.1.1/cli");
     assert.equal(headers.Authorization, "Bearer public"); // anonymous lane credential
     assert.equal(typeof registeredConfig.refreshModels, "function");
     // No provider-level streamSimple: Pi's composer would route solely the
@@ -177,7 +177,7 @@ test("cache-only refresh restores persisted snapshot without network", async () 
       compat: {
         supportsStore: false,
         supportsDeveloperRole: false,
-        maxTokensField: "max_tokens",
+        maxTokensField: "max_completion_tokens",
       },
     };
     const responsesModel = {
@@ -206,7 +206,10 @@ test("cache-only refresh restores persisted snapshot without network", async () 
     assert.equal((restored[0] as any).baseUrl, undefined); // default baseUrl inherited from provider
     assert.equal((restored[1] as any).api, "zen-openai-responses"); // zen engine per model
     assert.equal((restored[2] as any).api, "zen-anthropic-messages");
-    assert.equal((restored[2] as any).baseUrl, "https://opencode.ai/inference"); // non-default baseUrl preserved
+    assert.equal(
+      (restored[2] as any).baseUrl,
+      "https://opencode.ai/inference/anthropic",
+    ); // legacy flat base migrates to the family-scoped route
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -306,7 +309,7 @@ test("network refresh discovers models and persists a stamped snapshot", async (
     });
 
     assert.equal(refreshed[0].id, "hy3-free");
-    assert.equal(refreshed[0].compat.maxTokensField, "max_tokens"); // config shape
+    assert.equal(refreshed[0].compat.maxTokensField, "max_completion_tokens"); // config shape
     assert.ok(published, "persist must be called on successful discovery");
     assert.equal(published.persist.models[0].provider, "opencode-free"); // stamped
     assert.equal(published.persist.models[0].api, "zen-openai-completions");
@@ -453,7 +456,7 @@ test('header hook swaps any credential for the anonymous "public" token', async 
     /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/,
   );
   assert.equal(headers["x-opencode-request"], undefined); // instant 403 upstream
-  assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
+  assert.equal(headers["User-Agent"], "opencode/latest/2.1.1/cli");
   assert.equal(headers["x-opencode-client"], "cli");
 });
 
@@ -473,7 +476,7 @@ test("header hook replaces lowercase authorization and native api-key headers wi
   );
   assert.equal(headers["x-goog-api-key"], "public"); // google lane credential
   assert.ok(!("X-Goog-Api-Key" in headers), "mixed-case variant must not survive");
-  assert.equal(headers["User-Agent"], "opencode/latest/2.0.32/cli");
+  assert.equal(headers["User-Agent"], "opencode/latest/2.1.1/cli");
   assert.ok(!("user-agent" in headers), "lowercase user-agent must not survive");
 });
 
@@ -545,7 +548,10 @@ test("cache-only refresh re-derives anthropic baseUrl from legacy snapshots", as
     });
     assert.equal(restored.length, 1);
     assert.equal((restored[0] as any).api, "zen-anthropic-messages");
-    assert.equal((restored[0] as any).baseUrl, "https://opencode.ai/inference");
+    assert.equal(
+      (restored[0] as any).baseUrl,
+      "https://opencode.ai/inference/anthropic",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
