@@ -97,8 +97,16 @@ Uses [Bun](https://bun.sh)
 ```bash
 bun install
 bun test src/            # unit tests
+bun run extract-tools    # sync src/opencode-tools.json with latest official release
+bun run extract-tools:check # verify catalog is in sync with official release
 bun scripts/smoke-real.ts  # live request against Zen
 ```
+
+### Tool synchronization
+
+The free-tier gate fingerprints the exact parameter schema and wording of core tools. Genuine definitions are extracted directly from official releases of [anomalyco/opencode](https://github.com/anomalyco/opencode) via `scripts/extract-tools.ts` and stored in `src/opencode-tools.json`.
+
+An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) runs daily to detect new stable OpenCode releases and opens a Pull Request when upstream definitions change.
 
 | File | Purpose |
 |------|---------|
@@ -108,6 +116,7 @@ bun scripts/smoke-real.ts  # live request against Zen
 | `src/zen-headers.ts` | Shared OpenCode client identity: headers, session/request ids |
 | `src/required-child.ts` | Self-registration for subagent children (optional `pi-subagents`) |
 | `src/zen-tools.ts` | Genuine OpenCode tool definitions + free-tier `context.tools` shaping |
+| `scripts/extract-tools.ts` | Dumps genuine tool definitions from official OpenCode release binaries |
 | `scripts/smoke-real.ts` | Live end-to-end checks against the Zen API |
 
 ## License

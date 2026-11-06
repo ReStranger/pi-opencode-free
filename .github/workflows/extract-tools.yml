@@ -1,0 +1,60 @@
+name: Sync Genuine OpenCode Tools
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC to detect newly released OpenCode versions
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Target release tag in anomalyco/opencode (default: latest stable vX.Y.Z)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-tools:
+    name: Extract & Verify Tools
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Extract genuine tool catalog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            bun run extract-tools --tag "${{ inputs.tag }}"
+          else
+            bun run extract-tools
+          fi
+
+      - name: Run typecheck and tests
+        run: |
+          bun run typecheck
+          bun test src/
+
+      - name: Create Pull Request if catalog updated
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(tools): sync catalog with anomalyco/opencode"
+          title: "chore(tools): sync catalog with anomalyco/opencode"
+          body: |
+            Automated extraction of genuine OpenCode tool definitions from the official release in https://github.com/anomalyco/opencode.
+
+            Extracted via `scripts/extract-tools.ts` and validated by `bun test src/` and `bun run typecheck`.
+          branch: chore/sync-opencode-tools
+          delete-branch: true

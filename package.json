@@ -35,7 +35,9 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test src/",
-    "smoke": "bun scripts/smoke-real.ts"
+    "smoke": "bun scripts/smoke-real.ts",
+    "extract-tools": "bun scripts/extract-tools.ts --write",
+    "extract-tools:check": "bun scripts/extract-tools.ts --check"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

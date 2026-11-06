@@ -18,8 +18,9 @@
  * one; Pi renders `<cwd>`/`<mcp_servers>` instead). `applyOpenCodeFreeContext`
  * appends a small real environment block when the tag is absent.
  *
- * Definitions are the genuine OpenCode ones captured from the official CLI
- * (byte-equality is what the gate checks), kept in `./opencode-tools.json`.
+ * Definitions are the genuine OpenCode ones dumped directly from the official
+ * releases of anomalyco/opencode (byte-equality is what the gate checks),
+ * kept in `./opencode-tools.json` and maintained via `scripts/extract-tools.ts`.
  * Tool order is irrelevant and extra client tools are allowed.
  */
 import type { Context, Tool } from "@earendil-works/pi-ai";
