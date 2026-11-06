@@ -1,4 +1,4 @@
-name: Sync Genuine OpenCode Tools
+name: Sync OpenCode Upstream Contract
 
 on:
   schedule:
@@ -16,8 +16,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  sync-tools:
-    name: Extract & Verify Tools
+  sync-contract:
+    name: Extract & Verify Upstream Contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -41,20 +41,30 @@ jobs:
             bun run extract-tools
           fi
 
+      - name: Extract client User-Agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            bun run extract-user-agent --tag "${{ inputs.tag }}"
+          else
+            bun run extract-user-agent
+          fi
+
       - name: Run typecheck and tests
         run: |
           bun run typecheck
           bun test src/
 
-      - name: Create Pull Request if catalog updated
+      - name: Create Pull Request if upstream changed
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(tools): sync catalog with anomalyco/opencode"
-          title: "chore(tools): sync catalog with anomalyco/opencode"
+          commit-message: "chore(upstream): sync tools and User-Agent with anomalyco/opencode"
+          title: "chore(upstream): sync tools and User-Agent with anomalyco/opencode"
           body: |
-            Automated extraction of genuine OpenCode tool definitions from the official release in https://github.com/anomalyco/opencode.
+            Automated extraction of genuine OpenCode tool definitions and client User-Agent from the official release in https://github.com/anomalyco/opencode.
 
-            Extracted via `scripts/extract-tools.ts` and validated by `bun test src/` and `bun run typecheck`.
-          branch: chore/sync-opencode-tools
+            Extracted via `scripts/extract-tools.ts` and `scripts/extract-user-agent.ts`, validated by `bun test src/` and `bun run typecheck`.
+          branch: chore/sync-opencode-upstream
           delete-branch: true

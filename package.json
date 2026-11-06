@@ -37,7 +37,9 @@
     "test": "bun test src/",
     "smoke": "bun scripts/smoke-real.ts",
     "extract-tools": "bun scripts/extract-tools.ts --write",
-    "extract-tools:check": "bun scripts/extract-tools.ts --check"
+    "extract-tools:check": "bun scripts/extract-tools.ts --check",
+    "extract-user-agent": "bun scripts/extract-user-agent.ts --write",
+    "extract-user-agent:check": "bun scripts/extract-user-agent.ts --check"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

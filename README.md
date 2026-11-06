@@ -19,7 +19,7 @@ The Pi CLI already ships an `opencode` provider, but through it the models only 
 > `max_completion_tokens: 32000`, `strict: false` on function tools, client
 > key order, no HTML escaping); this extension
 > mirrors the official OpenCode client exactly — the `opencode/<channel>/<version>/<cli>`
-> User-Agent (currently `2.1.1`), descending-encoded session ids (`x-opencode-session` +
+> User-Agent (synced with official releases via extractor), descending-encoded session ids (`x-opencode-session` +
 > `x-opencode-session-id`), no `x-opencode-request`, the anonymous `public`
 > credential, the genuine core OpenCode tool definitions (Linux `shell`
 > wording), and the literal `<env>...</env>` system-prompt block on every
@@ -96,17 +96,19 @@ Uses [Bun](https://bun.sh)
 
 ```bash
 bun install
-bun test src/            # unit tests
-bun run extract-tools    # sync src/opencode-tools.json with latest official release
-bun run extract-tools:check # verify catalog is in sync with official release
-bun scripts/smoke-real.ts  # live request against Zen
+bun test src/               # unit tests
+bun run extract-tools       # sync src/opencode-tools.json with latest official release
+bun run extract-tools:check # verify tools catalog is in sync with official release
+bun run extract-user-agent  # sync OPENCODE_USER_AGENT with latest official release
+bun run extract-user-agent:check # verify User-Agent is in sync with official release
+bun scripts/smoke-real.ts   # live request against Zen
 ```
 
-### Tool synchronization
+### Upstream contract synchronization
 
-The free-tier gate fingerprints the exact parameter schema and wording of core tools. Genuine definitions are extracted directly from official releases of [anomalyco/opencode](https://github.com/anomalyco/opencode) via `scripts/extract-tools.ts` and stored in `src/opencode-tools.json`.
+The free-tier gate fingerprints client identity (`User-Agent`) and the exact parameter schema and wording of core tools. Genuine definitions and client identity headers are extracted directly from official releases of [anomalyco/opencode](https://github.com/anomalyco/opencode) via `scripts/extract-tools.ts` and `scripts/extract-user-agent.ts`.
 
-An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) runs daily to detect new stable OpenCode releases and opens a Pull Request when upstream definitions change.
+An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) runs daily to detect new stable OpenCode releases and opens a Pull Request when upstream tools or User-Agent change.
 
 | File | Purpose |
 |------|---------|
@@ -117,6 +119,7 @@ An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) run
 | `src/required-child.ts` | Self-registration for subagent children (optional `pi-subagents`) |
 | `src/zen-tools.ts` | Genuine OpenCode tool definitions + free-tier `context.tools` shaping |
 | `scripts/extract-tools.ts` | Dumps genuine tool definitions from official OpenCode release binaries |
+| `scripts/extract-user-agent.ts` | Captures genuine wire User-Agent from official OpenCode release binaries |
 | `scripts/smoke-real.ts` | Live end-to-end checks against the Zen API |
 
 ## License

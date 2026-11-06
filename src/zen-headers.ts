@@ -19,8 +19,8 @@
  *    own URL. Anthropic messages requests additionally ride `?beta=true`
  *    (set by the `zen-*` engine adapter, see `./zen-engines.js`).
  * 2. Header shape — the runtime fetch default for `Accept` (all media
- *    types; the 2.1 client sets none explicitly), `opencode/latest/2.1.1/cli`
- *    User-Agent, a non-canonical
+ *    types; the 2.1 client sets none explicitly), `opencode/<channel>/<version>/cli`
+ *    User-Agent (OPENCODE_USER_AGENT), a non-canonical
  *    `x-opencode-project` (the client's own `global` passes), the session
  *    identity under `x-opencode-session` + `x-opencode-session-id` (one
  *    stable per-process id — the genuine client reuses its session for the
@@ -81,9 +81,9 @@ const TRUSTED_BASE_URLS = new Set([
 /**
  * The free-tier gate fingerprints the OpenCode client. Upstream accepts a
  * range of releases (the version number itself is not validated), kept
- * current with the latest public `@opencode/cli` (2.1.1 captured 2026-10-23).
+ * current with official releases of `@opencode/cli` via `scripts/extract-user-agent.ts`.
  */
-export const OPENCODE_USER_AGENT = "opencode/latest/2.1.1/cli";
+export const OPENCODE_USER_AGENT = "opencode/latest/2.2.5/cli";
 
 /**
  * The fixed beta set the v2 free-tier client sends on Anthropic messages
