@@ -50,7 +50,7 @@ Because subagent children also launch with ambient extensions disabled, the entr
 ## Install
 
 ```bash
-pi install npm:pi-opencode-free
+pi install git:github.com/ReStranger/pi-opencode-free
 ```
 
 
