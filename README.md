@@ -108,7 +108,7 @@ bun scripts/smoke-real.ts   # live request against Zen
 
 The free-tier gate fingerprints client identity (`User-Agent`) and the exact parameter schema and wording of core tools. Genuine definitions and client identity headers are extracted directly from official releases of [anomalyco/opencode](https://github.com/anomalyco/opencode) via `scripts/extract-tools.ts` and `scripts/extract-user-agent.ts`.
 
-An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) runs daily to detect new stable OpenCode releases and opens a Pull Request when upstream tools or User-Agent change.
+An automated GitHub Actions workflow (`.github/workflows/extract-tools.yml`) runs daily to detect new stable OpenCode releases and commits updates directly when upstream tools or User-Agent change.
 
 | File | Purpose |
 |------|---------|

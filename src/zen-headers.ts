@@ -83,7 +83,7 @@ const TRUSTED_BASE_URLS = new Set([
  * range of releases (the version number itself is not validated), kept
  * current with official releases of `@opencode/cli` via `scripts/extract-user-agent.ts`.
  */
-export const OPENCODE_USER_AGENT = "opencode/latest/2.2.5/cli";
+export const OPENCODE_USER_AGENT = "opencode/latest/2.2.7/cli";
 
 /**
  * The fixed beta set the v2 free-tier client sends on Anthropic messages
