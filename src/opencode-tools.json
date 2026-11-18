@@ -44,6 +44,41 @@
    "additionalProperties": false
   }
  },
+ "experimental_image_generate": {
+  "description": "Generates a new image, or edits existing ones.\nOnly call this when the user asks you to create or edit an image. If you think an image would help but the user didn't ask for one, ask them first instead of generating it.\nImages you pass are used as the source to edit, or as references for style and subject.\nEach call makes one image. For several images, call it once per image.\nIt runs in the background: the call starts a job and returns right away, and you are notified automatically when the image is saved, with its path. Never poll, sleep, or check for the file while you wait.\nDon't repeat a request unless the user asks.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "prompt": {
+     "type": "string",
+     "minLength": 1,
+     "description": "What to create, or for edits, what to change. Be specific about subject, style, composition and any text that should appear in the image."
+    },
+    "images": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1
+     },
+     "minItems": 1,
+     "maxItems": 8,
+     "description": "Images to edit, or to use as references for style and subject when creating a new image, in order. Local file paths (relative to the session directory or absolute) or http(s) URLs."
+    },
+    "model": {
+     "type": "string",
+     "description": "NEVER set this unless the user explicitly asks for a particular image model or variant. The value is written as \"providerID/modelID\", or \"providerID/modelID#variant\" to include a variant. Do not guess the ID: look it up with the models tool using type: \"image\", filtering to your own provider first."
+    },
+    "path": {
+     "type": "string",
+     "description": "Where to save the image, relative to the session directory or absolute. The extension is replaced with the image's real format, and an existing file is overwritten. Defaults to a new file in the session's temp folder."
+    }
+   },
+   "required": [
+    "prompt"
+   ],
+   "additionalProperties": false
+  }
+ },
  "glob": {
   "description": "Search file paths using a glob pattern (examples: \"**/*.ts\", \"src/**/*.tsx\").",
   "parameters": {
@@ -189,7 +224,7 @@
   }
  },
  "read": {
-  "description": "Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.",
+  "description": "Read the contents of a file or directory. Supports text files, images, and PDFs. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -214,7 +249,7 @@
   }
  },
  "shell": {
-  "description": "Execute a shell command and return its output. Commands run on Linux using bash. Quote file paths containing spaces or special characters. Prefer dedicated tools over shell commands when possible. When output is large, the full result is saved to a file and a truncated preview is returned. Rely on automatic truncation unless filtering the output is more useful. Commands accept an optional timeout, background commands have no timeout by default. Background commands return immediately, and you will be notified when they complete.",
+  "description": "Execute a shell command and return its output. Commands run on Linux using bash. Quote file paths containing spaces or special characters. Prefer dedicated tools over shell commands when possible. When output is large, the full result is saved to a file and a truncated preview is returned. Rely on automatic truncation unless filtering the output is more useful. Commands still running after their timeout move to the background. Background commands return immediately, and you will be notified when they complete. The current session ID is available in the OPENCODE_SESSION_ID environment variable.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -229,7 +264,7 @@
     "timeout": {
      "type": "integer",
      "minimum": 0,
-     "description": "Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to 120000 for foreground commands. Background commands have no timeout by default."
+     "description": "Optional timeout in milliseconds (default 120000). When it expires, a foreground command moves to the background and a background command is stopped."
     },
     "background": {
      "type": "boolean",
