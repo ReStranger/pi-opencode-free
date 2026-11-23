@@ -44,7 +44,7 @@
    "additionalProperties": false
   }
  },
- "experimental_image_generate": {
+ "generate_image": {
   "description": "Generates a new image, or edits existing ones.\nOnly call this when the user asks you to create or edit an image. If you think an image would help but the user didn't ask for one, ask them first instead of generating it.\nImages you pass are used as the source to edit, or as references for style and subject.\nEach call makes one image. For several images, call it once per image.\nIt runs in the background: the call starts a job and returns right away, and you are notified automatically when the image is saved, with its path. Never poll, sleep, or check for the file while you wait.\nDon't repeat a request unless the user asks.",
   "parameters": {
    "type": "object",
@@ -71,6 +71,67 @@
     "path": {
      "type": "string",
      "description": "Where to save the image, relative to the session directory or absolute. The extension is replaced with the image's real format, and an existing file is overwritten. Defaults to a new file in the session's temp folder."
+    }
+   },
+   "required": [
+    "prompt"
+   ],
+   "additionalProperties": false
+  }
+ },
+ "generate_video": {
+  "description": "Generates a video from a prompt, optionally starting or ending on given images and guided by reference images, videos or audio.\nOnly call this when the user asks for a video: videos are slow and expensive.\nIt runs in the background, and you are notified with every saved file when it finishes. Never poll, sleep, or check for the file while you wait.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "prompt": {
+     "type": "string",
+     "minLength": 1,
+     "description": "What happens in the video. Describe the subject, action, camera movement, style and, when sound is on, any dialogue or sound."
+    },
+    "start": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Image the video starts on exactly. A local file path (relative to the session directory or absolute) or an http(s) URL."
+    },
+    "end": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Image the video ends on exactly. A local file path or an http(s) URL."
+    },
+    "references": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1
+     },
+     "minItems": 1,
+     "description": "Images, videos or audio that guide the subject, style, motion or voice without being shown as-is. Local file paths or http(s) URLs."
+    },
+    "duration": {
+     "type": "integer",
+     "exclusiveMinimum": 0,
+     "description": "Length in seconds."
+    },
+    "aspect": {
+     "type": "string",
+     "description": "Aspect ratio as \"width:height\", such as \"16:9\" or \"9:16\", or \"auto\" to follow the start image."
+    },
+    "resolution": {
+     "type": "string",
+     "description": "Output resolution, such as \"480p\", \"720p\", \"1080p\" or \"4k\"."
+    },
+    "sound": {
+     "type": "boolean",
+     "description": "Whether the video has generated sound. Unset uses the model's default."
+    },
+    "model": {
+     "type": "string",
+     "description": "NEVER set this unless the user explicitly asks for a particular video model. The value is written as \"providerID/modelID\". Do not guess the ID: look it up with the models tool using type: \"video\", filtering to your own provider first."
+    },
+    "path": {
+     "type": "string",
+     "description": "Where to save the video, relative to the session directory or absolute, usually ending in .mp4. An existing file is overwritten. Further videos from the same job go next to it with -1, -2, … before the extension. Defaults to a new file in the session's temp folder."
     }
    },
    "required": [
@@ -294,7 +355,7 @@
   }
  },
  "subagent": {
-  "description": "Spawns an agent in a child session to work on the specified task.\nSubagents always run in the background: the call returns immediately with a sessionID, and you receive a `<subagent>` message each time the child goes idle, including after later work.\nKeep working on non-overlapping tasks, or briefly tell the user what you launched and end your response. Do not sleep, poll, or proactively check on the child's progress.\nNew child sessions start with fresh context, so include all relevant context and instructions when you don't pass a sessionID.\nPass the returned sessionID to continue that specific child conversation. A follow-up to a running child joins its current run.\n\nAvailable subagents:\n- explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions.\n- general: General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+  "description": "Spawns an agent in a child session to work on the specified task.\nSubagents always run in the background: the call returns immediately with a sessionID, and you receive a `<background-result kind=\"subagent\">` message each time the child goes idle, including after later work.\nKeep working on non-overlapping tasks, or briefly tell the user what you launched and end your response. Do not sleep, poll, or proactively check on the child's progress.\nNew child sessions start with fresh context, so include all relevant context and instructions when you don't pass a sessionID.\nPass the returned sessionID to continue that specific child conversation. A follow-up to a running child joins its current run.\n\nAvailable subagents:\n- explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions.\n- general: General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
   "parameters": {
    "type": "object",
    "properties": {
