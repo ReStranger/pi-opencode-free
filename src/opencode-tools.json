@@ -30,7 +30,7 @@
   }
  },
  "execute": {
-  "description": "Run JavaScript in a confined Code Mode runtime to script tool calls and HTTP requests and compose their results.\nWrite plain JavaScript and send it exactly as written: no code fence, and no JSON or other wrapper around it.\n`fetch` is available for HTTP requests. Imports, direct filesystem access, and timers are unavailable: there is no `setTimeout` or sleep. All other external access goes through `tools`.\nInside `execute`, the only callable tools are those explicitly listed in the Code Mode catalog instructions or returned by the `search` function. Ignore tools shown outside the Code Mode catalog. They are not available in the Code Mode runtime.\nCall tools through `tools` using only exact paths and signatures from the catalog. Do not infer or normalize tool names; preserve bracket notation such as `tools.<namespace>[\"tool-name\"](input)`.\nPrefer an explicit `return`; if omitted, the final top-level expression becomes the result.\nAwait every call whose completion matters; pending calls are interrupted when execution ends. Run independent calls concurrently with `Promise.allSettled`.",
+  "description": "Run JavaScript in a confined Code Mode runtime to script tool calls and HTTP requests and compose their results.\nWrite plain JavaScript and send it exactly as written: no code fence, and no JSON or other wrapper around it.\nEach call is a fresh program; nothing carries over from earlier calls.\n`fetch` is available for HTTP requests. Imports, direct filesystem access, and timers are unavailable: there is no `setTimeout` or sleep. All other external access goes through `tools`.\nInside `execute`, the only callable tools are those explicitly listed in the Code Mode catalog instructions or returned by the `search` function. Ignore tools shown outside the Code Mode catalog. They are not available in the Code Mode runtime.\nCall tools through `tools` using only exact paths and signatures from the catalog. Do not infer or normalize tool names; preserve bracket notation such as `tools.<namespace>[\"tool-name\"](input)`.\nPrefer an explicit `return`; if omitted, the final top-level expression becomes the result.\nAwait every call whose completion matters; pending calls are interrupted when execution ends. Run independent calls concurrently with `Promise.allSettled`.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -40,102 +40,6 @@
    },
    "required": [
     "code"
-   ],
-   "additionalProperties": false
-  }
- },
- "generate_image": {
-  "description": "Generates a new image, or edits existing ones.\nOnly call this when the user asks you to create or edit an image. If you think an image would help but the user didn't ask for one, ask them first instead of generating it.\nImages you pass are used as the source to edit, or as references for style and subject.\nEach call makes one image. For several images, call it once per image.\nIt runs in the background: the call starts a job and returns right away, and you are notified automatically when the image is saved, with its path. Never poll, sleep, or check for the file while you wait.\nDon't repeat a request unless the user asks.",
-  "parameters": {
-   "type": "object",
-   "properties": {
-    "prompt": {
-     "type": "string",
-     "minLength": 1,
-     "description": "What to create, or for edits, what to change. Be specific about subject, style, composition and any text that should appear in the image."
-    },
-    "images": {
-     "type": "array",
-     "items": {
-      "type": "string",
-      "minLength": 1
-     },
-     "minItems": 1,
-     "maxItems": 8,
-     "description": "Images to edit, or to use as references for style and subject when creating a new image, in order. Local file paths (relative to the session directory or absolute) or http(s) URLs."
-    },
-    "model": {
-     "type": "string",
-     "description": "NEVER set this unless the user explicitly asks for a particular image model or variant. The value is written as \"providerID/modelID\", or \"providerID/modelID#variant\" to include a variant. Do not guess the ID: look it up with the models tool using type: \"image\", filtering to your own provider first."
-    },
-    "path": {
-     "type": "string",
-     "description": "Where to save the image, relative to the session directory or absolute. The extension is replaced with the image's real format, and an existing file is overwritten. Defaults to a new file in the session's temp folder."
-    }
-   },
-   "required": [
-    "prompt"
-   ],
-   "additionalProperties": false
-  }
- },
- "generate_video": {
-  "description": "Generates a video from a prompt, optionally starting or ending on given images and guided by reference images, videos or audio.\nOnly call this when the user asks for a video: videos are slow and expensive.\nIt runs in the background, and you are notified with every saved file when it finishes. Never poll, sleep, or check for the file while you wait.",
-  "parameters": {
-   "type": "object",
-   "properties": {
-    "prompt": {
-     "type": "string",
-     "minLength": 1,
-     "description": "What happens in the video. Describe the subject, action, camera movement, style and, when sound is on, any dialogue or sound."
-    },
-    "start": {
-     "type": "string",
-     "minLength": 1,
-     "description": "Image the video starts on exactly. A local file path (relative to the session directory or absolute) or an http(s) URL."
-    },
-    "end": {
-     "type": "string",
-     "minLength": 1,
-     "description": "Image the video ends on exactly. A local file path or an http(s) URL."
-    },
-    "references": {
-     "type": "array",
-     "items": {
-      "type": "string",
-      "minLength": 1
-     },
-     "minItems": 1,
-     "description": "Images, videos or audio that guide the subject, style, motion or voice without being shown as-is. Local file paths or http(s) URLs."
-    },
-    "duration": {
-     "type": "integer",
-     "exclusiveMinimum": 0,
-     "description": "Length in seconds."
-    },
-    "aspect": {
-     "type": "string",
-     "description": "Aspect ratio as \"width:height\", such as \"16:9\" or \"9:16\", or \"auto\" to follow the start image."
-    },
-    "resolution": {
-     "type": "string",
-     "description": "Output resolution, such as \"480p\", \"720p\", \"1080p\" or \"4k\"."
-    },
-    "sound": {
-     "type": "boolean",
-     "description": "Whether the video has generated sound. Unset uses the model's default."
-    },
-    "model": {
-     "type": "string",
-     "description": "NEVER set this unless the user explicitly asks for a particular video model. The value is written as \"providerID/modelID\". Do not guess the ID: look it up with the models tool using type: \"video\", filtering to your own provider first."
-    },
-    "path": {
-     "type": "string",
-     "description": "Where to save the video, relative to the session directory or absolute, usually ending in .mp4. An existing file is overwritten. Further videos from the same job go next to it with -1, -2, … before the extension. Defaults to a new file in the session's temp folder."
-    }
-   },
-   "required": [
-    "prompt"
    ],
    "additionalProperties": false
   }
